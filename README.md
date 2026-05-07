@@ -1,0 +1,324 @@
+# taskwarrior-web
+
+Local-only web UI for Taskwarrior 3.x. Single Go binary, served on `127.0.0.1:5050`. Auto-refreshes the list view every 30s; pauses while you're editing so mid-flight inputs aren't clobbered.
+
+## Stack
+
+- Go 1.25 stdlib `net/http` (pattern routing, no router framework).
+- [templ](https://templ.guide/) for typed HTML.
+- [HTMX 2.x](https://htmx.org/) for in-place updates without an SPA.
+- [Tailwind v4](https://tailwindcss.com/) standalone CLI (no Node).
+- macOS launchd for auto-start at login.
+
+No Docker, no Node, no database server. Reads/writes go through the existing `task` CLI on the host, which serialises against `~/.task/taskchampion.sqlite3`.
+
+## Build
+
+```sh
+make build           # one-shot: templ generate + tailwindcss + go build
+```
+
+Output: `bin/taskwarrior-web` (~7 MB stripped binary, all assets embedded).
+
+## Run
+
+```sh
+./bin/taskwarrior-web                  # foreground
+make run                               # alias for the above
+open http://127.0.0.1:5050             # in browser
+```
+
+## Install as a LaunchAgent (auto-start at login)
+
+```sh
+make install
+```
+
+This:
+
+1. Copies `bin/taskwarrior-web` to `~/.local/bin/`.
+2. Renders `deploy/local.taskwarrior-web.plist.tmpl` into `~/Library/LaunchAgents/`.
+3. Bootstraps it via `launchctl bootstrap gui/$(id -u)`.
+4. Creates `~/Library/Logs/taskwarrior-web/`.
+5. Enforces `chmod 700 ~/.task`.
+6. Curls `/healthz` to verify it's listening.
+
+It restarts on crash (KeepAlive on `Crashed=true`) but stays down when stopped cleanly via `launchctl bootout`.
+
+To also append a `tw` alias that opens `http://127.0.0.1:5050`, opt in via
+`INSTALL_ALIAS`:
+
+| Value | Behaviour |
+|---|---|
+| `1` / `auto` | Detect login shell from `$SHELL`, write to that config only |
+| `zsh` | Write to `~/.zshrc` |
+| `bash` | Write to `~/.bash_profile` (macOS) or `~/.bashrc` (Linux) |
+| `fish` | Write to `~/.config/fish/config.fish` |
+| `all` | Write to every shell config above |
+
+Examples:
+
+```sh
+INSTALL_ALIAS=1 make install            # auto: matches your login shell
+INSTALL_ALIAS=fish make install         # explicit
+INSTALL_ALIAS=all make install          # every shell at once
+```
+
+The alias resolves the URL-opener at install time: macOS gets `open
+http://...`, Linux gets `xdg-open http://...`. Off by default so a fresh
+install never silently mutates a shell config; idempotent on re-run.
+
+`make uninstall` strips the alias from every known shell config defensively,
+regardless of which one the install used.
+
+## Uninstall
+
+```sh
+make uninstall
+```
+
+Stops the service, removes the plist, removes the binary from `~/.local/bin/`, and strips the `tw` alias from `~/.zshrc` if it's there. Logs in `~/Library/Logs/taskwarrior-web/` are preserved.
+
+## Develop
+
+```sh
+make dev
+```
+
+Runs three processes in parallel:
+
+- `templ generate --watch` (recompiles templates on save)
+- `tailwindcss --watch` (recompiles CSS on class-name changes)
+- `go run .` (the server)
+
+Edit `.templ` / `.go` / `.css` / `web/static/js/*.js` files and the running binary picks up changes.
+
+## Verify
+
+```sh
+make check     # generators run cleanly with non-empty outputs
+make test      # go test ./...
+```
+
+A handful of smoke tests in `internal/tw/client_test.go` shell out to the real `task` binary; each one skips cleanly when `task` is not on `$PATH`, and the read-side smokes additionally skip when the user has no tasks. Anything that mutates state creates a throwaway task, exercises the path under test, and deletes/purges the task in a `defer`, so running the suite never leaves residue in your taskrc.
+
+## Security notes
+
+- **Bind**: explicit `tcp4` to `127.0.0.1:5050`. Other machines on the LAN cannot reach it. Allowed-host and origin maps are derived from `internal/config.Addr` so the bind port can never drift between three places.
+- **CSRF**: double-submit cookie + `X-CSRF-Token` header (auto-injected by `web/static/js/core_csrf.js` on every HTMX request from the page). `SameSite=Strict`, HttpOnly, 32 random bytes.
+- **Command injection**: `tw.AddInput.AddArgs()` always wraps user-supplied description in `description:"<text>"` form. Tokens like `+urgent due:tomorrow rc.data.location=/tmp/x` are stored as literal text, not interpreted as DOM modifiers. `tw.guardArgs` rejects any caller-supplied `rc.*` arg as defence-in-depth.
+- **Hostile taskrc**: a context's read filter is composed into argv as `(filter)` for export, which would otherwise let `rc.*` tokens slip past `guardArgs`. `tw.Context.SafeReadFilter()` scans for `rc.*` tokens at point of use and returns empty (no context clause) if any are present.
+- **Subprocess**: `context.WithTimeout` per invocation (10s default; bulk handlers get 30s; `_context` lookup gets 2s; all centralised in `internal/config`). 64 MB `io.LimitReader` cap on stdout. Stderr captured into a 4 KiB bounded buffer attached to a typed `*tw.TaskExitError` for in-process classification only - never logged.
+- **Validation errors**: typed `*tw.ValidationError{Field, Value, Reason}` instead of string-prefix matched messages, so renaming a message can't silently break field-level highlighting in the UI.
+- **Length cap**: descriptions and annotations are bounded to 4 KiB (`tw.MaxDescriptionBytes`) so a multi-megabyte payload can't blow past the platform's argv limit.
+- **Logs**: live in `~/Library/Logs/taskwarrior-web/` with mode 700 - never `/tmp` (world-readable on macOS). Logs include only method, path, status, duration, request-id; never form bodies, query strings on writes, or task descriptions.
+
+### Logs
+
+- **Primary**: `~/Library/Logs/taskwarrior-web/app.log` - structured slog text output, size-rotated by [lumberjack](https://github.com/natefinch/lumberjack) baked into the binary. Policy: 10 MB per file, 3 backups, gzip-compressed, 30 day max age. Active file is `app.log`; rotated files become `app-<timestamp>.log.gz`.
+- **Panic safety net**: `out.log` and `err.log` are captured by launchd via the plist's `StandardOutPath` / `StandardErrorPath` and are NOT rotated. `err.log` should stay near-empty under normal operation (only Go runtime panics go to stderr). `out.log` will mirror `app.log` because the binary fans slog output through `io.MultiWriter(os.Stdout, app.log)`; if it grows uncomfortably between launchd cycles, truncate it manually with `: > ~/Library/Logs/taskwarrior-web/out.log` - the binary will reopen on next write. The rotated `app.log` is the source of truth; `out.log` exists so anything written before slog initialises still leaves a trace.
+
+## Dark mode
+
+The UI follows the OS `prefers-color-scheme` setting by default. A sun/moon button in the top-right of the header overrides and persists the choice in `localStorage` ("light" or "dark"); clear it to revert to OS-driven behaviour. The `.dark` class is applied to `<html>` synchronously by `web/static/theme.js` (loaded in `<head>` before paint) so there's no flash of light content on reload. The 4-tier WCAG-AA palette (Blue/Yellow/Orange/Red for urgency) and the calendar's solid-due-day vs light-scheduled-day distinction are preserved in both modes - dark mode inverts the "light" tier (very dark fill, light text, visible ring) so the brightness-contrast cue between scheduled and due chips remains colourblind-safe.
+
+## Keybindings
+
+CLI-friendly navigation. All bindings are inert while a text input/textarea is focused or a dialog is open.
+
+| Key     | Action                                                |
+| ------- | ----------------------------------------------------- |
+| `n`     | Open the add-task modal                               |
+| `j`     | Focus the next task in the list                       |
+| `k`     | Focus the previous task                               |
+| `Enter` | Edit the focused task (opens modal)                   |
+| `x`     | Mark the focused task done (with confirm)             |
+| `Space` | Toggle the focused row's bulk-select checkbox         |
+| `*`     | Select every visible row                              |
+| `Esc`   | Close any open dialog, or clear the bulk selection    |
+| `?`     | Show the keybindings help dialog                      |
+
+Row focus is preserved across the 30s poll/HTMX swap by task UUID; if the focused task is gone, focus snaps to the first row. Space's fallback (no current focus) dispatches a `taskwarrior:focus-row` CustomEvent so the row it just toggled becomes the focused one and `j`/`k` continues from there.
+
+The keybinding list is the single source of truth for both the help dialog and the small footer cheat-sheet (`internal/views/keybindings.go`).
+
+## Undo
+
+The right-hand side of the nav has an **Undo** button that reverses the last Taskwarrior change (it shells `task undo`). A styled confirmation dialog asks first; on accept the call posts to `POST /undo` and the list refreshes via `HX-Trigger: refresh`. Repeated clicks walk further back through the undo log. Taskwarrior's normal interactive prompt is bypassed by the `rc.confirmation=no` safety arg the server already prepends to every invocation.
+
+## Row chrome
+
+Each row in a list view has, left to right: bulk-select checkbox, mark-done circle (or "completed <when>" pill on the Done page), description + project / tag / due / blocked / waiting badges, urgency bar, **edit** (or **delete** on Done), and a chevron at the far right that expands the info panel. The same `rowFrame(t, done bool)` partial powers both pending and completed rows so the layout stays in sync; the only thing that varies is the action button (`edit` ↔ `delete`) and the absence of the done-circle on completed tasks.
+
+The expanded info panel uses a 4-column grid on `sm:` and up (label / value / label / value) so short fields tile two-up. Date fields are explicitly column-pinned: future-facing dates (Due / Wait / Scheduled for start) on the left, provenance dates (Created / Modified) on the right, regardless of which optional fields are present. Long fields (Tags / Notes / Blocked by) span the full row. UDAs sit at the bottom of the panel under a thin grey rule, one row per UDA (Priority, plus any user-defined fields).
+
+The expanded state is held client-side keyed by row id, so it survives the 30s polling refresh; rows that vanish from the list have their state pruned automatically.
+
+## Bulk operations
+
+Each row has a checkbox at the left. Tick one or more rows and an action bar appears at the top of the list:
+
+- **Mark done** posts to `POST /tasks/bulk/done`.
+- **Delete** posts to `POST /tasks/bulk/delete`.
+- **Clear** drops the selection without touching any tasks.
+
+The selection persists across the 30s polling refresh: rows that are still rendered are re-ticked after each swap, and ids whose rows have disappeared (because someone else completed/deleted the task) are pruned silently. Cap is 100 ids per request; the server rejects larger batches with 400. Individual failures inside a batch are logged but do not abort the rest of the batch.
+
+## Search
+
+The Next/Ready/Agenda/Forecast views render a search box top-right of the nav. Typing case-insensitive substring matches against description, project, and tags; results stream in via HTMX with a 200ms debounce on `input` events. The filter is server-side (the partial endpoint accepts `?q=...`) and is preserved across the 30s poll - `core_refresh.js` mirrors the current `q` into `#task-list`'s `hx-get` after each swap so the next poll keeps the filter applied. Clear the box to restore the full list. Search is intentionally absent from project/tag drilldowns and the Calendar/Browse pages.
+
+## Sorting
+
+Every list view (Next, Ready, Agenda, Forecast, plus project and tag drill-downs) renders a row of column links above the task list: Urgency, Due, Project, Description, Created. Clicking one of these:
+
+- switches to that key (using its natural default direction) when it isn't currently active, or
+- flips the direction (asc <-> desc) when the column is already active.
+
+Defaults: urgency desc, due asc (earliest first), project asc, description asc, entry/created desc (newest first). Tasks without a `due` date always sort last regardless of direction so scheduled work floats to the top.
+
+State lives in `?sort=<key>[:<dir>]` on the partial endpoint - omit it for the default urgency-desc order. After each HTMX swap, `sort.js` mirrors the current `?sort=` into `#task-list`'s `hx-get` so the 30s poll keeps the chosen order. Same pattern as the search-sync handler; the two are independent modules.
+
+## Calendar
+
+`/calendar` renders open tasks (pending or waiting) on a Monday-Sunday grid with three modes: **Month** (default), **Week**, **Day**. Switch via the buttons top-right; step periods with the prev/next arrows; click a day number to drill into Day view.
+
+Tasks appear when they have a `due` date:
+
+- **Multi-day chip** when both `scheduled` and `due` are set (or `wait` and `due`, falling back if there's no `scheduled`): one chip per day in the span, with the corners rounded only at the start day and the end day so the row reads as a continuous bar.
+- **Single-day chip** when only `due` is set.
+- **Not on the calendar** when `due` is empty.
+
+Chip colour comes from urgency (red >= 8, amber >= 4, blue otherwise). Click any chip to open the existing edit modal. Month cells cap at 3 chips with a "+K more" link into Day view; Week and Day are uncapped.
+
+Query params: `?view=<month|week|day>&date=YYYY-MM-DD`. Bad input returns 400.
+
+## Done view
+
+`/done` lists tasks completed in the last N days (default 14, configurable via `?days=N`, clamped 1-90), sorted by completion timestamp desc. Each row reuses the same `rowFrame` chrome as the live lists - same chevron, same expand panel, same completed-on pill - so navigating from Ready to Done feels continuous. The action button is **delete** (red on hover) so a stray completion can be purged from history; same `/tasks/{id}` DELETE endpoint as the edit modal.
+
+## UDAs
+
+User-Defined Attributes are discovered automatically from `~/.taskrc` and TTL-cached on the `tw.Client` (60s). Define one with:
+
+```
+uda.estimate.type=duration
+uda.estimate.label=Estimate
+```
+
+The add/edit modals render an input for every UDA the next time the cache refreshes (or immediately on server restart). Values are submitted as `<name>:"<value>"` so embedded DOM tokens stay literal. Empty values on modify CLEAR the attribute; empty on add stays unset.
+
+Type mapping for input controls:
+
+- `string` -> `<input type="text">`
+- `numeric` -> `<input type="number">` (validated as a float server-side)
+- `date` -> `<input type="date">` (accepts YYYY-MM-DD plus Taskwarrior keywords like `tomorrow` / `due-3d`)
+- `duration` -> `<input type="text">` with placeholder "PT4H / 2d / 1w"
+
+UDA names must match `^[a-zA-Z][a-zA-Z0-9_]{0,63}$`; entries with shell metacharacters or parser tokens are dropped at discovery time.
+
+UDA values render as first-class rows in the row info panel, one per UDA, separated from the built-in fields by a thin grey rule. `priority` is treated as a UDA on read (Taskwarrior 3.x emits it at the top level of the export JSON even when redeclared as a UDA); the form's Priority dropdown stays in sync.
+
+## Contexts
+
+Taskwarrior contexts are persistent filters defined via the CLI; once active, every list / export / add is implicitly scoped to the context's read filter. taskwarrior-web surfaces this as a coloured pill in the top nav, between the search box and Undo:
+
+- **Inactive** - outline-only, greyed funnel icon, label "all", trailing chevron. Click to open the dropdown.
+- **Active** - solid hashed-colour fill, leading status dot with a soft pulse, funnel icon, bold context name, trailing "x" for one-click clear.
+
+Click the pill to open a dropdown listing every defined context (plus "(none)" at the top to clear). Picking an entry POSTs to `/context` and the server replies with `HX-Refresh: true`, reloading the page so the pill, the browser title hint (`Next [work] · taskwarrior-web`), the empty-state copy ("No tasks match in context 'work'.") and the Add Task modal all re-render against the new active state.
+
+Define / list / clear contexts with the CLI; this UI does not provide a manage screen by design:
+
+```
+task context define work +work
+task context define home +home
+task context work       # activates "work" everywhere
+task context none       # clears
+```
+
+Pill colour is hashed from the context name into an 18-slot palette (six base hues - blue, teal, purple, amber, orange, pink - times three rounds: base, lighter, darker), so the same context always gets the same hue across reloads. Red is reserved for urgency-critical signals elsewhere and never used for contexts. Yellow is always paired with dark text to meet WCAG AA.
+
+The active context name is read fresh on every page render (cheap `task _get rc.context` subprocess call); the list of defined contexts is TTL-cached on the `tw.Client` (60s).
+
+**Filter composition.** Taskwarrior 3.x's `task export` does NOT honour the active context implicitly (unlike `task list` / `task next`). Reports rendered through the web UI compose the active read filter into every export argv via `(v *Views) exportWithContext` so the filter applies consistently. Empty filter = no clause prepended.
+
+### Add modal context picker
+
+The Add Task modal carries its own context dropdown in the header, defaulting to whichever context is currently active. Picking a different one silently overwrites the Tags / Project inputs with the new context's prefill values, and an italic helper line under the dropdown explains what's about to be attached ("Adds +client tag", "Sets Project = team", or "No context tag/project will be added"). This lets you stay in (say) the personnel context while capturing a one-off vendor task, without flipping the global context and back.
+
+The prefill is derived from each context's read filter via `views.ContextPrefill`: first lowercase `+tag` wins, otherwise first `project:value` wins, ALL-UPPERCASE virtual tags are skipped. For an OR-shaped filter like `+team or project:team or project:hiring`, the picker prefills `+team`.
+
+Note: Taskwarrior's per-context **write** filter is NOT applied automatically by the binary for OR-shaped filters - it gets confused and mangles the description. The form-level prefill is the only reliable way to keep new tasks consistent with the lens the user is working in. As a result we explicitly clear the write filter on every context defined via the UI (or you can do it manually with `task config context.<name>.write ""`).
+
+## Dependencies
+
+Each task in Taskwarrior carries an optional `depends:` list - the UUIDs of tasks that must finish before this one is actionable. taskwarrior-web surfaces this end-to-end:
+
+- **Row badge.** Any task with at least one `depends` entry shows a small "lock N blocked" badge inline with its tags / project / due chips. The count is the raw size of `t.Depends`; whether each prerequisite is still open is left to the `+READY` virtual tag (Ready view already filters them out).
+- **Expand panel.** "Blocked by" section listing each prerequisite's truncated UUID (first 8 hex chars + ellipsis). Each entry is a link that opens that task's edit modal in-place via HTMX.
+- **Multi-select picker.** The add/edit modals carry a "Depends on" field rendered as a tag-input style picker: pills for the currently-selected dependencies, a text input that autocompletes from the themed dropdown described below, and a hidden form field carrying the comma-joined UUID list. Press Enter on the typing input to add a pill once the typed value resolves to a UUID; click the x on any pill to remove it. The hidden field stays in sync with the live pill set, so submitting the form posts the right `depends:UUID,UUID` argv. An empty submission on edit clears every dependency (Taskwarrior's `depends:` clear-arg).
+- **Validation.** Each UUID is checked against `tw.IDPattern` server-side before the call; malformed entries return 400. The picker's option list excludes the task currently being edited (a task cannot depend on itself).
+
+Server fetches the open-tasks list once per modal render via `task export "(status:pending or status:waiting)"` - same query as the Browse page. If the export fails the modal still renders without a populated picker rather than 500ing the entire edit.
+
+Known v2 TODO: the row's expand panel only shows "Blocked by"; the inverse "Blocks" (dependents) view is intentionally absent because computing it per-row would N+1 the list render. A future pass could prefetch via one `task export depends.any:` call and join client-side.
+
+## Themed autocomplete
+
+The Project, Tags, and Depends-on inputs in the add/edit modals use a custom-themed dropdown component (replacing the previous native `<datalist>`). The component is a styled `<input>` followed by a hidden `<ul>` of options that the autocomplete IIFE in `web/static/js/autocomplete.js` opens, filters as the user types, and lets them navigate by keyboard (Arrow up/down, Enter, Esc) or mouse. Selecting an option:
+
+- **single mode** (Project) replaces the input value.
+- **tokens mode** (Tags) appends as a new comma-separated token.
+- **deps mode** (Depends-on) dispatches an `autocomplete:select` CustomEvent that the dep-picker module intercepts to add a pill instead of mutating the input.
+
+Project / tags lists are TTL-cached on the `tw.Client` (60s); virtual tags (`+OVERDUE`, `+READY`, etc.) are filtered out at discovery so the dropdown only suggests tags you can actually set. Light and dark mode are both fully styled, so dropdown appearance is consistent regardless of OS theme.
+
+## Form validation
+
+When `task add` / `task <id> modify` rejects an input, the server responds 400 + an HTML error fragment swapped into `#task-form-errors` at the bottom of the modal. The fragment carries `data-field-error="<name>"`, which the form-validation module reads to:
+
+1. Add a red border + ring to the offending input.
+2. Auto-focus the input.
+
+Highlight clears on the first `input` event so it doesn't feel sticky once the user starts fixing the value. Date fields carry a small `?` help tooltip (native `<details>`/`<summary>`, no JS) that documents the accepted forms - absolute (`2026-05-09`), keywords (`tomorrow`, `eom`), relative offsets (`+2d`, `due-3d`).
+
+Validation errors are typed (`*tw.ValidationError{Field, Value, Reason}`) so the field classifier uses `errors.As` rather than parsing message text - renaming a message can't silently break the highlight.
+
+## Mark done from edit modal
+
+The edit modal carries a green **Mark done** button next to **Save** (with a styled confirmation), so completing a task from the calendar's chip-click flow doesn't need to drop back to the row's done circle. Same `/tasks/{id}/done` endpoint as the inline circle. The modal closes on success via a delegated `data-close-on-success` handler (replaces inline `hx-on::after-request` so CSP `unsafe-eval` stays a defence-in-depth signal rather than an active sink).
+
+## Inline annotation on save
+
+Typing a note in the **Add a note (or click Save to attach it)...** input then clicking **Save** attaches the note as an annotation in addition to whatever else changed. The annotation input is part of the modal's main form; the modify handler picks up the `text` field after the structured modify lands and calls `task <id> annotate`. The dedicated **Add** button still works for the "add note, keep modal open" flow.
+
+If the modify lands but the annotation fails (very rare; only the second `task` call), the response is a soft warning ("Task saved, but the note couldn't be attached") rather than a 500 - the structured edits already persisted, no need to roll back.
+
+## Known limitations
+
+- **No recurrence editing.** `recur:`, `until:` fields aren't surfaced in the form. To create a recurring task you'd shell `task add ... recur:weekly` from the CLI; the row UI does render the recurrence virtual tag if present, but you can't author it here yet.
+- **No start/stop time tracking.** `task <id> start` / `stop` and `+ACTIVE` aren't surfaced. Less critical for non-billable workflows, but the active-task indicator is useful for "what was I in the middle of yesterday."
+- **No task duplicate.** No "create similar task" button (`task <id> duplicate`).
+- **No SSE.** Polling at 30s only.
+- **No drag/drop reordering.** Sort is via column headers, not by hand.
+- **Search is substring-only.** No way to compose `priority:H and project:hiring` ad-hoc through the search box; use a context or a defined report.
+
+## Where things live
+
+```
+internal/tw/        Taskwarrior CLI wrapper. Only place that touches `task` or sqlite.
+internal/server/    HTTP server, middleware, routes, CSRF.
+internal/server/handlers/  HTTP handlers split by concern (views, tasks, forms, contexts, partials, calendar, form_errors).
+internal/views/     templ files + small Go helpers (urls, format, palette, keybindings, styles).
+internal/config/    Centralised timeouts, bind addr, derived host/origin allowlists.
+web/static/         Embedded static assets (htmx.min.js, theme.js, app.css, favicon.svg).
+web/static/js/      Per-feature JS modules (core_*, keys, bulk, search, sort, row_expand,
+                    context_pill, context_picker, autocomplete, deps, form_validation).
+scripts/            Install/uninstall + the standalone tailwindcss binary.
+deploy/             LaunchAgent plist template.
+```
+
+JS is split per-feature instead of a single `app.js` so each module has a clear responsibility, and the browser shows them per-source in DevTools. All scripts are loaded individually via `<script src defer>` (no bundle step). `core_*.js` modules set up cross-feature plumbing (CSRF, confirm dialog, modal lifecycle, refresh, theme); the rest are self-contained feature modules that hook into HTMX events.
+
+Production code currently sits around 4,000 LOC of Go plus ~1,500 lines of templ; the original 500-line v0 budget was abandoned once contexts, dependencies, custom autocomplete, themed validation, calendar, the config package, and the per-feature JS split landed.

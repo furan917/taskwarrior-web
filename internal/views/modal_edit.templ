@@ -1,0 +1,50 @@
+package views
+
+import (
+	"strings"
+
+	"github.com/furan917/taskwarrior-web/internal/tw"
+)
+
+templ ModalEdit(csrf string, t tw.Task, udas []tw.UDA, projects, tags []string, allOpenTasks []tw.Task) {
+	@modalShell() {
+		<form hx-put={ taskURL(t) } hx-target-error="#task-form-errors" hx-swap="innerHTML" class="flex flex-col">
+			<input type="hidden" name="_csrf" value={ csrf }/>
+			@modalHeader("Edit task")
+			@formFields(taskForm{
+				Description: t.Description,
+				Project:     t.Project,
+				Tags:        strings.Join(t.Tags, ", "),
+				Due:         humanDate(t.Due),
+				Wait:        humanDate(t.Wait),
+				Scheduled:   humanDate(t.Scheduled),
+				UDAs:        udaFormValues(t, udas),
+				Depends:     t.Depends,
+			}, udas, projects, tags, allOpenTasks)
+			@AnnotationsPanel(t)
+			<div id="task-form-errors" class="empty:hidden border-t border-zinc-200 px-4 py-3 dark:border-zinc-700"></div>
+			<div class="flex items-center justify-between gap-2 border-t border-zinc-200 px-4 py-3 dark:border-zinc-700">
+				<button
+					type="button"
+					hx-delete={ taskURL(t) }
+					hx-swap="none"
+					hx-confirm="Delete this task?"
+					data-close-on-success
+					class="rounded bg-red-600 px-3 py-1.5 text-sm font-medium text-white hover:bg-red-700 focus:outline-none focus:ring-2 focus:ring-red-500 focus:ring-offset-2 dark:focus:ring-offset-zinc-900"
+				>Delete</button>
+				<div class="flex gap-2">
+					<button type="button" data-dismiss-modal class="rounded px-3 py-1.5 text-sm text-zinc-600 hover:bg-zinc-100 dark:text-zinc-300 dark:hover:bg-zinc-800">Cancel</button>
+					<button
+						type="button"
+						hx-post={ rowDoneURL(t) }
+						hx-swap="none"
+						hx-confirm="Mark this task done?"
+						data-close-on-success
+						class="rounded bg-emerald-600 px-3 py-1.5 text-sm font-medium text-white hover:bg-emerald-700 focus:outline-none focus:ring-2 focus:ring-emerald-500 focus:ring-offset-2 dark:focus:ring-offset-zinc-900"
+					>Mark done</button>
+					<button type="submit" class="rounded bg-blue-600 px-3 py-1.5 text-sm font-medium text-white hover:bg-blue-700">Save</button>
+				</div>
+			</div>
+		</form>
+	}
+}

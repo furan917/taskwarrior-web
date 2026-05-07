@@ -1,0 +1,244 @@
+package views
+
+import (
+	"fmt"
+
+	"github.com/furan917/taskwarrior-web/internal/tw"
+)
+
+// Row is the standard task row used by Ready / Next / Agenda / Forecast /
+// Project / Tag / Calendar's chip-info path. DoneRow is the read-only
+// variant used by the Done report - same chrome (bulk checkbox, expand
+// chevron, info panel) but swaps the done-circle for nothing and the edit
+// button for delete. Both share rowDetailGrid for the expand panel so the
+// info layout stays consistent across reports.
+templ Row(t tw.Task) {
+	@rowFrame(t, false)
+}
+
+templ DoneRow(t tw.Task) {
+	@rowFrame(t, true)
+}
+
+// rowFrame is the shared row chrome. The `done` flag swaps:
+//   - done-circle → omitted (the task is already done)
+//   - edit → delete (completed tasks are read-only; the only useful
+//     destructive action is purging them entirely)
+templ rowFrame(t tw.Task, done bool) {
+	<li id={ "task-" + taskKey(t) } data-expanded="0" class={ "group " + CardClass() }>
+		<div class="flex items-center gap-3 p-3">
+			<input
+				type="checkbox"
+				class="task-select h-4 w-4 flex-none rounded border-zinc-300 text-blue-600 focus:ring-blue-500 dark:border-zinc-600 dark:bg-zinc-800"
+				data-task-id={ taskKey(t) }
+				aria-label="Select for bulk action"
+			/>
+			if !done {
+				<button
+					type="button"
+					hx-post={ rowDoneURL(t) }
+					hx-swap="none"
+					hx-confirm="Mark this task done?"
+					class="row-action-done h-5 w-5 flex-none rounded-full border border-zinc-300 transition hover:border-emerald-500 hover:bg-emerald-50 dark:border-zinc-600 dark:hover:border-emerald-500 dark:hover:bg-emerald-950/40"
+					title="Mark done"
+					aria-label="Mark done"
+				></button>
+			}
+			<div class="min-w-0 flex-1">
+				<p class="truncate text-sm font-medium text-zinc-900 dark:text-zinc-100">{ t.Description }</p>
+				<div class="mt-1 flex flex-wrap items-center gap-2">
+					@Project(t.Project)
+					for _, tag := range t.Tags {
+						@Tag(tag)
+					}
+					@Due(t.Due)
+					if t.Status == "waiting" && t.Wait != "" {
+						<span class="inline-flex items-center rounded bg-zinc-100 px-2 py-0.5 text-xs text-zinc-500 dark:bg-zinc-800 dark:text-zinc-400">surfaces { dueLabel(t.Wait) }</span>
+					}
+					if len(t.Depends) > 0 {
+						<span class="inline-flex items-center rounded bg-zinc-100 px-2 py-0.5 text-xs text-zinc-700 dark:bg-zinc-800 dark:text-zinc-300" title="Blocked by other tasks">{ blockedBadgeLabel(len(t.Depends)) }</span>
+					}
+					for name, value := range t.UDAs {
+						if value != "" {
+							<span class="inline-flex items-center rounded bg-zinc-100 px-2 py-0.5 text-xs text-zinc-600 dark:bg-zinc-800 dark:text-zinc-300">{ name }: { value }</span>
+						}
+					}
+					if done && t.Modified != "" {
+						<span class="inline-flex items-center rounded bg-zinc-100 px-2 py-0.5 text-xs text-zinc-500 dark:bg-zinc-800 dark:text-zinc-400">completed { humanDateTime(t.Modified) }</span>
+					}
+				</div>
+			</div>
+			@Urgency(t.Urgency)
+			if done {
+				<button
+					type="button"
+					hx-delete={ taskURL(t) }
+					hx-swap="none"
+					hx-confirm="Delete this completed task?"
+					class="row-action-delete text-xs text-zinc-500 hover:text-red-700 dark:text-zinc-400 dark:hover:text-red-400"
+					title="Delete task"
+				>delete</button>
+			} else {
+				<button
+					type="button"
+					hx-get={ rowEditURL(t) }
+					hx-target="#modal"
+					class="row-action-edit text-xs text-zinc-500 hover:text-zinc-900 dark:text-zinc-400 dark:hover:text-zinc-100"
+					title="Edit task"
+				>edit</button>
+			}
+			// aria-expanded="false" is the initial state; the row-toggle click
+			// handler in app.js (Row info expand/collapse IIFE) flips it on
+			// open/close - same pattern as the form-error swap target where
+			// the JS owns the post-hydration attribute.
+			<button
+				type="button"
+				class="row-toggle inline-flex h-7 w-7 flex-none items-center justify-center rounded-full text-zinc-400 hover:bg-zinc-100 hover:text-zinc-900 dark:text-zinc-500 dark:hover:bg-zinc-800 dark:hover:text-zinc-100"
+				aria-label="Expand task details"
+				aria-expanded="false"
+				title="Show task details"
+			>
+				<svg class="row-chevron h-4 w-4 transition-transform duration-150" viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+					<polyline points="7 5 13 10 7 15"></polyline>
+				</svg>
+			</button>
+		</div>
+		<div class="row-details hidden border-t border-zinc-200 px-3 py-3 text-xs text-zinc-600 dark:border-zinc-700 dark:text-zinc-400">
+			@rowDetailGrid(t)
+		</div>
+	</li>
+}
+
+templ rowDetailGrid(t tw.Task) {
+	<dl class="grid grid-cols-[max-content_1fr] gap-x-3 gap-y-1 sm:grid-cols-[max-content_1fr_max-content_1fr]">
+		@detailRow("UUID", "wide") {
+			<span class="font-mono text-[11px] break-all select-all">{ t.UUID }</span>
+		}
+		@detailRow("Description", "wide") {
+			<span class="break-words">{ t.Description }</span>
+		}
+		@detailRow("Urgency", "") {
+			{ fmt.Sprintf("%.2f", t.Urgency) }
+		}
+		@detailRow("Status", "") {
+			{ t.Status }
+		}
+		if t.Project != "" {
+			@detailRow("Project", "") {
+				<a
+					href={ templ.SafeURL("/project/" + t.Project) }
+					class="text-blue-700 hover:underline dark:text-blue-400"
+					title={ "Browse project " + t.Project }
+				>{ t.Project }</a>
+			}
+		}
+		if t.ID != 0 {
+			@detailRow("ID", "") {
+				{ fmt.Sprintf("%d", t.ID) }
+			}
+		}
+		// Date fields are explicitly column-pinned: future-facing dates (Due,
+		// Wait, Scheduled for start) on the left; provenance dates (Created,
+		// Modified) on the right. The detailRow "left"/"right" kinds carry
+		// sm:col-start-1 / sm:col-start-3 so dates land in their semantic
+		// column even when an optional field is missing - without this the
+		// auto-flow would shuffle them across columns based on which
+		// conditionals fired.
+		if t.Due != "" {
+			@detailRow("Due", "left") {
+				{ humanDateTime(t.Due) }
+			}
+		}
+		if t.Entry != "" {
+			@detailRow("Created", "right") {
+				{ humanDateTime(t.Entry) }
+			}
+		}
+		if t.Wait != "" {
+			@detailRow("Wait", "left") {
+				{ humanDateTime(t.Wait) }
+			}
+		}
+		if t.Modified != "" {
+			@detailRow("Modified", "right") {
+				{ humanDateTime(t.Modified) }
+			}
+		}
+		if t.Scheduled != "" {
+			@detailRow("Scheduled for start", "left") {
+				{ humanDateTime(t.Scheduled) }
+			}
+		}
+		// Long fields (Tags, Notes, Blocked by, UDAs section) use the "long"
+		// kind which forces `sm:col-start-1` on the dt so they always begin a
+		// fresh row. Without it, when a long field lands in the second pair
+		// slot (cols 3-4), its dd's `sm:col-span-3` overflows past col 4 and
+		// wraps awkwardly - the dt ends up paired with the previous short-
+		// pair's value rather than its own. Forcing col-start-1 pushes long
+		// fields to row-start regardless of auto-flow state.
+		if len(t.Tags) > 0 {
+			@detailRow("Tags", "long") {
+				for i, tag := range t.Tags {
+					if i > 0 {
+						{ ", " }
+					}
+					<a
+						href={ templ.SafeURL("/tag/" + tag) }
+						class="text-blue-700 hover:underline dark:text-blue-400"
+						title={ "Browse tag +" + tag }
+					>{ tag }</a>
+				}
+			}
+		}
+		if len(t.Annotations) > 0 {
+			@detailRow("Notes", "long") {
+				<div class="space-y-0.5">
+					for _, a := range t.Annotations {
+						<div>{ a.Description }</div>
+					}
+				</div>
+			}
+		}
+		if len(t.Depends) > 0 {
+			@detailRow("Blocked by", "long") {
+				for i, dep := range t.Depends {
+					if i > 0 {
+						{ ", " }
+					}
+					<a
+						href={ templ.SafeURL(rowEditURLByUUID(dep)) }
+						hx-get={ rowEditURLByUUID(dep) }
+						hx-target="#modal"
+						class="font-mono text-[11px] text-blue-700 hover:underline dark:text-blue-400"
+					>{ shortUUID(dep) }</a>
+				}
+			}
+			// TODO(v2): also surface a "Blocks" section listing the tasks whose
+			// `depends` includes t.UUID. The lookup is per-uuid (one Export per
+			// row) so wiring it into row.templ would N+1 every list render;
+			// punt until we can prefetch via one `task export depends.any:`
+			// pass and join in Go.
+		}
+		// First-class UDA rendering: each UDA with a non-empty value gets its
+		// own dt/dd pair, sitting at the bottom of the grid after all the
+		// built-in fields. A thin grey rule above the section visually
+		// separates "built-in task data" from "user-defined attributes".
+		// The first UDA forces sm:col-start-1 (via the "left" kind) so it
+		// lands at the leftmost column right under the rule; subsequent UDAs
+		// flow naturally and pair up two-per-row at sm+ widths.
+		if udaNames := sortedUDANames(t.UDAs); len(udaNames) > 0 {
+			<div class="col-span-2 mt-1 border-t border-zinc-200 dark:border-zinc-800 sm:col-span-4" aria-hidden="true"></div>
+			for i, name := range udaNames {
+				if i == 0 {
+					@detailRow(udaDisplayLabel(name), "left") {
+						<span class="break-words">{ t.UDAs[name] }</span>
+					}
+				} else {
+					@detailRow(udaDisplayLabel(name), "") {
+						<span class="break-words">{ t.UDAs[name] }</span>
+					}
+				}
+			}
+		}
+	</dl>
+}

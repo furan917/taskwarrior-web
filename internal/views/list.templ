@@ -1,0 +1,154 @@
+package views
+
+import (
+	"fmt"
+
+	"github.com/furan917/taskwarrior-web/internal/tw"
+)
+
+// ListPage is the full-page render for one report (or a project drilldown).
+// The container at #task-list is the polling target; its hx-trigger is gated by
+// shouldRefresh() in app.js so editing isn't interrupted.
+//
+// The poll URL omits any &q=... — full-page renders never carry a search term.
+// When the user types into the search box, the JS IIFE in app.js mirrors the
+// current q into this container's hx-get attribute so the next 30s poll keeps
+// the filter applied. The sort-sync IIFE does the same for ?sort=.
+templ ListPage(p Page, report, project string, tasks []tw.Task, sort SortSpec) {
+	@Layout(p) {
+		<div class="mb-3 flex items-baseline justify-between">
+			<h2 class="text-lg font-medium">{ p.Title }</h2>
+			@Indicator()
+		</div>
+		@BulkBar()
+		<div
+			id="task-list"
+			hx-get={ partialURLWithSort(report, project, sort) }
+			hx-trigger={ fmt.Sprintf("every %ds [shouldRefresh()], refresh from:body", PollIntervalSeconds) }
+			hx-sync="this:replace"
+			hx-swap="innerHTML transition:true"
+		>
+			@TaskListFragment(report, project, "", tasks, sort, p.ActiveContext)
+		</div>
+	}
+}
+
+// BulkBar renders the multi-select action bar. Hidden by default; revealed via
+// JS in app.js (Bulk-select IIFE) when at least one row checkbox is ticked.
+// Both action buttons POST so they pick up the existing CSRF middleware path.
+templ BulkBar() {
+	<div id="bulk-bar" hidden class="mb-3 flex items-center gap-3 rounded border border-blue-200 bg-blue-50 px-4 py-2 text-sm dark:border-blue-900 dark:bg-blue-950/40 dark:text-zinc-200">
+		<span><span id="bulk-count">0</span> selected</span>
+		<button
+			type="button"
+			id="bulk-done"
+			hx-post="/tasks/bulk/done"
+			hx-include="[name='bulk-ids']"
+			hx-confirm="Mark selected tasks done?"
+			hx-swap="none"
+			class="rounded bg-emerald-600 px-3 py-1 text-white text-xs font-medium hover:bg-emerald-700"
+		>Mark done</button>
+		<button
+			type="button"
+			id="bulk-delete"
+			hx-post="/tasks/bulk/delete"
+			hx-include="[name='bulk-ids']"
+			hx-confirm="Delete selected tasks?"
+			hx-swap="none"
+			class="rounded bg-red-600 px-3 py-1 text-white text-xs font-medium hover:bg-red-700"
+		>Delete</button>
+		<button type="button" id="bulk-clear" class="ml-auto text-xs text-zinc-500 hover:text-zinc-900 dark:text-zinc-400 dark:hover:text-zinc-100">Clear</button>
+		<input type="hidden" name="bulk-ids" id="bulk-ids" value=""/>
+	</div>
+}
+
+// TaskListFragment is the polling response. /partials/list returns ONLY this
+// fragment so the swap doesn't replace the layout. q is the active search
+// term (empty when no search is in flight) so the empty-state can distinguish
+// "no tasks at all" from "no tasks match the query".
+//
+// Sort header + search input share the same row above the list. Both render
+// inside this fragment so the partial swap updates sort arrows in place; the
+// search input carries hx-preserve so its value/focus survive each swap.
+templ TaskListFragment(report, project, q string, tasks []tw.Task, sort SortSpec, activeContext string) {
+	<div class="mb-2 flex flex-wrap items-center justify-between gap-2">
+		@SortHeader(report, project, sort)
+		@SearchBox(report, project, q)
+	</div>
+	if len(tasks) == 0 {
+		@EmptyState(report, q, activeContext)
+	} else {
+		<ul class="space-y-2">
+			for _, t := range tasks {
+				@Row(t)
+			}
+		</ul>
+	}
+}
+
+// SortHeader renders the row of sortable column links above the task list.
+// Each link is a button that issues hx-get to /partials/list with the next
+// sort param; the active key is highlighted and shows ↑/↓ for the direction.
+templ SortHeader(report, project string, sort SortSpec) {
+	<div class="flex flex-wrap items-center gap-2 text-xs text-zinc-500 dark:text-zinc-400">
+		<span class="mr-1">Sort:</span>
+		for _, key := range SortKeys {
+			@SortLink(report, project, sort, key, SortLabels[key])
+		}
+	</div>
+}
+
+// SearchBox is the in-row search input. hx-preserve keeps the user's typed
+// value and focus across the 30 s poll swap and across sort-click swaps —
+// the element with id="search-input" is left unmodified by HTMX even though
+// the surrounding fragment is replaced wholesale.
+templ SearchBox(report, project, q string) {
+	<input
+		id="search-input"
+		hx-preserve="true"
+		type="search"
+		name="q"
+		value={ q }
+		placeholder="Search…"
+		hx-get={ partialURL(report, project) }
+		hx-trigger={ fmt.Sprintf("input changed delay:%dms, search", SearchDebounceMs) }
+		hx-target="#task-list"
+		hx-sync="this:replace"
+		hx-swap="innerHTML"
+		hx-include="this"
+		autocomplete="off"
+		class={ SearchInputWidth + " rounded border border-zinc-300 bg-white px-2 py-1 text-sm text-zinc-900 focus:border-blue-500 focus:outline-none dark:border-zinc-600 dark:bg-zinc-800 dark:text-zinc-100 dark:placeholder-zinc-500" }
+	/>
+}
+
+// SortLink is one column-header button. Clicking flips direction (when this
+// key is already active) or switches to this key with its default direction.
+templ SortLink(report, project string, sort SortSpec, key, label string) {
+	<button
+		type="button"
+		hx-get={ sortURL(report, project, sort, key) }
+		hx-target="#task-list"
+		hx-swap="innerHTML"
+		class={ sortLinkClass(sort, key) }
+		aria-label={ "Sort by " + label }
+	>
+		{ label }
+		if a := sortArrow(sort, key); a != "" {
+			<span aria-hidden="true">{ a }</span>
+		}
+	</button>
+}
+
+templ EmptyState(report, q, activeContext string) {
+	@emptyCard() {
+		if q != "" {
+			<p class="text-sm text-zinc-500 dark:text-zinc-400">No tasks match "{ q }".</p>
+		} else if activeContext != "" {
+			<p class="text-sm text-zinc-500 dark:text-zinc-400">
+				@contextEmptyState(activeContext)
+			</p>
+		} else {
+			<p class="text-sm text-zinc-500 dark:text-zinc-400">{ emptyMessage(report) }</p>
+		}
+	}
+}

@@ -1,0 +1,146 @@
+package views
+
+templ Nav(active, activeContext string, contexts []NamedContext) {
+	<nav class="mb-6 flex items-center gap-1 border-b border-zinc-200 pb-3 dark:border-zinc-800">
+		@navLink("/ready", "Ready", active == "ready")
+		@navLink("/next", "Next", active == "next")
+		@navLink("/agenda", "Agenda", active == "agenda")
+		@navLink("/forecast", "Forecast", active == "forecast")
+		@navLink("/calendar", "Calendar", active == "calendar")
+		@navLink("/browse", "Browse", active == "browse")
+		@navLink("/done", "Done", active == "done")
+		<span class="ml-auto flex items-center gap-2">
+			@contextPill(activeContext, contexts)
+			<button
+				type="button"
+				hx-post="/undo"
+				hx-confirm="Undo the last change?"
+				hx-swap="none"
+				class="rounded border border-zinc-300 px-3 py-1.5 text-sm font-medium text-zinc-700 hover:bg-zinc-100 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:ring-offset-2 dark:border-zinc-600 dark:text-zinc-300 dark:hover:bg-zinc-800 dark:focus:ring-offset-zinc-950"
+				title="Undo last change"
+				aria-label="Undo"
+			>
+				Undo
+			</button>
+			<button
+				type="button"
+				hx-get="/forms/add"
+				hx-target="#modal"
+				class="rounded bg-blue-600 px-3 py-1.5 text-sm font-medium text-white shadow-sm hover:bg-blue-700 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:ring-offset-2 dark:focus:ring-offset-zinc-950"
+			>
+				+ Add Task
+			</button>
+		</span>
+	</nav>
+}
+
+templ navLink(href, label string, active bool) {
+	if active {
+		<a href={ templ.SafeURL(href) } class="rounded bg-zinc-900 px-3 py-1.5 text-sm font-medium text-white dark:bg-zinc-100 dark:text-zinc-900">{ label }</a>
+	} else {
+		<a href={ templ.SafeURL(href) } class="rounded px-3 py-1.5 text-sm font-medium text-zinc-600 hover:bg-zinc-100 dark:text-zinc-300 dark:hover:bg-zinc-800">{ label }</a>
+	}
+}
+
+// contextPill renders the persistent-filter indicator + dropdown trigger. The
+// pill switches between an inactive outline-only "all" affordance and a
+// solid coloured-fill active state with a status dot, name, and one-click
+// clear (×).
+//
+// Click handling lives in app.js (delegated): toggling [data-open="1"] on the
+// wrapper opens the sibling dropdown; click-outside / Esc close it.
+templ contextPill(activeContext string, contexts []NamedContext) {
+	<span class="relative inline-flex" data-context-wrap>
+		if activeContext != "" {
+			@contextPillActive(activeContext)
+		} else {
+			@contextPillInactive()
+		}
+		@contextDropdown(activeContext, contexts)
+	</span>
+}
+
+templ contextPillActive(name string) {
+	<button
+		type="button"
+		class={ PillActiveClass(ColourForContext(name)) }
+		aria-haspopup="menu"
+		aria-label={ "Context: " + name }
+		title={ "Context: " + name + " (click to switch)" }
+		data-context-pill
+	>
+		<span class="relative flex h-2 w-2">
+			<span class={ PillDotPingClass(ColourForContext(name)) } aria-hidden="true"></span>
+			<span class={ PillDotClass(ColourForContext(name)) } aria-hidden="true"></span>
+		</span>
+		<svg class="h-3.5 w-3.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+			<polygon points="22 3 2 3 10 12.46 10 19 14 21 14 12.46 22 3"></polygon>
+		</svg>
+		<span>{ name }</span>
+		<span
+			role="button"
+			tabindex="0"
+			hx-post={ contextSetURL }
+			hx-vals='{"name":""}'
+			hx-swap="none"
+			class="ml-1 cursor-pointer opacity-60 hover:opacity-100"
+			aria-label="Clear context"
+			title="Clear context"
+			data-context-clear
+		>×</span>
+	</button>
+}
+
+templ contextPillInactive() {
+	<button
+		type="button"
+		class="context-pill inline-flex items-center gap-1.5 rounded border border-zinc-300 py-1 px-2.5 text-sm font-medium text-zinc-500 hover:bg-zinc-100 dark:border-zinc-600 dark:text-zinc-400 dark:hover:bg-zinc-800"
+		aria-haspopup="menu"
+		aria-label="Context: none"
+		title="Click to choose a context"
+		data-context-pill
+	>
+		<svg class="h-3.5 w-3.5 text-zinc-400" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+			<polygon points="22 3 2 3 10 12.46 10 19 14 21 14 12.46 22 3"></polygon>
+		</svg>
+		<span>all</span>
+		<span class="text-xs opacity-60" aria-hidden="true">▾</span>
+	</button>
+}
+
+// contextDropdown is the sibling menu shown when the wrapper carries
+// [data-open="1"]. CSS selector in tailwind picks that up; absent that
+// attribute the menu stays display:none. Defined here so the wrapper plus
+// menu are co-located and the JS can treat them as one unit.
+templ contextDropdown(activeContext string, contexts []NamedContext) {
+	<div
+		class="absolute right-0 top-full z-30 mt-1 hidden min-w-44 rounded-md border border-zinc-200 bg-white shadow-lg dark:border-zinc-700 dark:bg-zinc-900"
+		role="menu"
+		data-context-menu
+	>
+		<div class="max-h-72 overflow-y-auto py-1 text-sm">
+			@contextMenuItem("", "(none)", activeContext == "")
+			for _, c := range contexts {
+				@contextMenuItem(c.Name, c.Name, c.Name == activeContext)
+			}
+		</div>
+		<div class="border-t border-zinc-200 px-3 py-1.5 text-[11px] text-zinc-500 dark:border-zinc-700 dark:text-zinc-400">Defined via CLI</div>
+	</div>
+}
+
+templ contextMenuItem(value, label string, active bool) {
+	<button
+		type="button"
+		role="menuitem"
+		hx-post={ contextSetURL }
+		hx-vals={ contextMenuVals(value) }
+		hx-swap="none"
+		class={ contextMenuItemClass(active) }
+		data-context-item
+	>
+		{ label }
+		if active {
+			<span class="ml-2 text-xs" aria-hidden="true">✓</span>
+		}
+	</button>
+}

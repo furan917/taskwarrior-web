@@ -1,0 +1,56 @@
+package views
+
+import "fmt"
+
+// Counted is one row in the projects or tags index: a name and the number of
+// open (pending or waiting) tasks attached to it.
+type Counted struct {
+	Name  string
+	Count int
+}
+
+templ LabelsPage(p Page, projects, tags []Counted) {
+	@Layout(p) {
+		<div class="mb-3 flex items-baseline justify-between">
+			<h2 class="text-lg font-medium">Browse</h2>
+			<span class="text-xs text-zinc-500 dark:text-zinc-400">open work only</span>
+		</div>
+		<section class="grid gap-6 md:grid-cols-2">
+			@labelColumn("Projects", "project", projects)
+			@labelColumn("Tags", "tag", tags)
+		</section>
+	}
+}
+
+templ labelColumn(title, kind string, items []Counted) {
+	<div>
+		<h3 class="mb-2 text-sm font-semibold uppercase tracking-wide text-zinc-500 dark:text-zinc-400">{ title }</h3>
+		if len(items) == 0 {
+			<p class={ EmptyCardClass() + " p-4 text-sm text-zinc-500 dark:text-zinc-400" }>No { title } in use.</p>
+		} else {
+			<ul class="divide-y divide-zinc-200 rounded border border-zinc-200 bg-white dark:divide-zinc-800 dark:border-zinc-800 dark:bg-zinc-900">
+				for _, item := range items {
+					<li>
+						<a href={ labelHref(kind, item.Name) } class="flex items-center justify-between px-3 py-2 text-sm hover:bg-zinc-50 dark:hover:bg-zinc-800">
+							<span class="truncate text-zinc-800 dark:text-zinc-200">
+								if kind == "tag" {
+									+{ item.Name }
+								} else {
+									{ item.Name }
+								}
+							</span>
+							<span class="ml-2 inline-flex items-center rounded bg-zinc-100 px-2 py-0.5 text-xs font-medium text-zinc-700 dark:bg-zinc-800 dark:text-zinc-200">{ fmt.Sprintf("%d", item.Count) }</span>
+						</a>
+					</li>
+				}
+			</ul>
+		}
+	</div>
+}
+
+func labelHref(kind, name string) templ.SafeURL {
+	if kind == "tag" {
+		return templ.SafeURL("/tag/" + name)
+	}
+	return templ.SafeURL("/project/" + name)
+}

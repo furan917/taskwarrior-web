@@ -1,0 +1,55 @@
+@import "tailwindcss";
+
+@source "../internal/views/**/*.templ";
+@source "../internal/views/**/*_templ.go";
+
+/*
+ * Dark mode is opt-in via an explicit `.dark` class on <html>. We do NOT use
+ * Tailwind v4's default `prefers-color-scheme` because the in-app toggle in
+ * app.js needs to override the OS setting and persist the choice in
+ * localStorage. theme.js (loaded synchronously in <head>) reads localStorage,
+ * falls back to prefers-color-scheme, and applies/removes the class before
+ * first paint to avoid FOUC.
+ */
+@variant dark (&:where(.dark, .dark *));
+
+/*
+ * Centre <dialog>.showModal() reliably across Chrome/Safari/Firefox. The
+ * UA `inset: 0; margin: auto` approach is fragile under Tailwind v4
+ * preflight (known issue across shadcn/Flowbite/etc as of 2026). Explicit
+ * fixed-position + translate works everywhere.
+ */
+@layer base {
+  dialog[open] {
+    position: fixed;
+    top: 50%;
+    left: 50%;
+    transform: translate(-50%, -50%);
+    margin: 0;
+    max-height: 90vh;
+    overflow: auto;
+  }
+}
+
+/*
+ * Component-layer rules that previously lived as runtime <style> injections
+ * in app.js. The injection sites still run (we'll remove them in the next
+ * batch) but this means the styles work even before app.js executes - any
+ * server-rendered .row-focused or open context dropdown shows correctly on
+ * first paint, no FOUC.
+ *
+ * Keep these in sync with the JS injections in app.js until that batch lands:
+ *   - .row-focused: ~line 32 (FOCUS_CLASS injection)
+ *   - .context-pill open rule: ~line 481 (context-wrap CSS injection)
+ */
+@layer components {
+  .row-focused {
+    outline: 2px solid #3b82f6;
+    outline-offset: 2px;
+    background-color: #eff6ff;
+  }
+
+  [data-context-wrap][data-open="1"] [data-context-menu] {
+    display: block !important;
+  }
+}

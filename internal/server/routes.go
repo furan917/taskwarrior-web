@@ -1,0 +1,63 @@
+package server
+
+import (
+	"net/http"
+
+	"github.com/furan917/taskwarrior-web/internal/server/handlers"
+)
+
+// staticHandler wraps the embedded FS server. Cache-Control is no-cache so the
+// browser always revalidates — assets aren't content-hashed yet, and one extra
+// localhost roundtrip per asset is cheaper than stale-JS-after-redeploy bugs.
+func staticHandler(h http.Handler) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Cache-Control", "no-cache, must-revalidate")
+		h.ServeHTTP(w, r)
+	})
+}
+
+// registerRoutes wires every URL contract once. The returned http.Handler
+// has CSRF middleware applied to everything except /healthz and /static/.
+func registerRoutes(mux *http.ServeMux, cfg Config) {
+	mux.HandleFunc("GET /healthz", handlers.Healthz)
+
+	if cfg.Static != nil {
+		fileServer := http.FileServerFS(cfg.Static)
+		mux.Handle("GET /static/", http.StripPrefix("/static/", staticHandler(fileServer)))
+	}
+
+	v := &handlers.Views{TW: cfg.TW, Logger: cfg.Logger}
+	t := &handlers.Tasks{TW: cfg.TW, Logger: cfg.Logger}
+	f := &handlers.Forms{TW: cfg.TW, Logger: cfg.Logger}
+	c := &handlers.Contexts{TW: cfg.TW, Logger: cfg.Logger}
+
+	// All app routes go through CSRF middleware.
+	app := http.NewServeMux()
+	app.HandleFunc("GET /", v.Home)
+	app.HandleFunc("GET /next", v.Report("next"))
+	app.HandleFunc("GET /ready", v.Report("ready"))
+	app.HandleFunc("GET /agenda", v.Report("agenda"))
+	app.HandleFunc("GET /forecast", v.Report("forecast"))
+	app.HandleFunc("GET /project/{name}", v.Project)
+	app.HandleFunc("GET /tag/{name}", v.Tag)
+	app.HandleFunc("GET /browse", v.Labels)
+	app.HandleFunc("GET /calendar", v.Calendar)
+	app.HandleFunc("GET /partials/list", v.Partial)
+
+	app.HandleFunc("GET /forms/add", f.Add)
+	app.HandleFunc("GET /forms/edit/{id}", f.Edit)
+
+	app.HandleFunc("POST /tasks", t.Create)
+	app.HandleFunc("PUT /tasks/{id}", t.Modify)
+	app.HandleFunc("POST /tasks/{id}/done", t.Done)
+	app.HandleFunc("DELETE /tasks/{id}", t.Delete)
+	app.HandleFunc("POST /tasks/bulk/done", t.BulkDone)
+	app.HandleFunc("POST /tasks/bulk/delete", t.BulkDelete)
+	app.HandleFunc("POST /tasks/{id}/annotate", t.Annotate)
+	app.HandleFunc("POST /tasks/{id}/denotate", t.Denotate)
+	app.HandleFunc("GET /done", v.Done)
+	app.HandleFunc("POST /undo", t.Undo)
+	app.HandleFunc("POST /context", c.Set)
+
+	mux.Handle("/", withCSRF(cfg.Logger, app))
+}

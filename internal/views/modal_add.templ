@@ -1,0 +1,41 @@
+package views
+
+import "github.com/furan917/taskwarrior-web/internal/tw"
+
+templ ModalAdd(csrf string, udas []tw.UDA, projects, tags []string, activeContext string, allOpenTasks []tw.Task, prefillProject, prefillTags string, contextOptions []ContextOption) {
+	@modalShell() {
+		<form hx-post="/tasks" hx-target-error="#task-form-errors" hx-swap="innerHTML" class="flex flex-col">
+			<input type="hidden" name="_csrf" value={ csrf }/>
+			@modalHeader("Add task") {
+				if len(contextOptions) > 0 {
+					<div class="mt-1.5 flex flex-col gap-0.5" data-context-control>
+						<label class="flex items-center gap-2 text-xs text-zinc-500 dark:text-zinc-400">
+							<span>Context:</span>
+							<select
+								class="rounded border border-zinc-300 bg-white px-2 py-0.5 text-xs text-zinc-900 focus:border-blue-500 focus:outline-none dark:border-zinc-600 dark:bg-zinc-800 dark:text-zinc-100"
+								data-context-select
+							>
+								<option value="" data-prefill-tags="" data-prefill-project="" selected?={ activeContext == "" }>(none)</option>
+								for _, opt := range contextOptions {
+									<option
+										value={ opt.Name }
+										data-prefill-tags={ opt.PrefillTags }
+										data-prefill-project={ opt.PrefillProject }
+										selected?={ opt.Name == activeContext }
+									>{ opt.Name }</option>
+								}
+							</select>
+						</label>
+						<p class="text-xs italic text-zinc-500 dark:text-zinc-400" data-context-helper>{ ContextHelperText(prefillTags, prefillProject) }</p>
+					</div>
+				}
+			}
+			@formFields(taskForm{Project: prefillProject, Tags: prefillTags}, udas, projects, tags, allOpenTasks)
+			<div id="task-form-errors" class="empty:hidden border-t border-zinc-200 px-4 py-3 dark:border-zinc-700"></div>
+			<div class="flex items-center justify-end gap-2 border-t border-zinc-200 px-4 py-3 dark:border-zinc-700">
+				<button type="button" data-dismiss-modal class="rounded px-3 py-1.5 text-sm text-zinc-600 hover:bg-zinc-100 dark:text-zinc-300 dark:hover:bg-zinc-800">Cancel</button>
+				<button type="submit" class="rounded bg-blue-600 px-3 py-1.5 text-sm font-medium text-white hover:bg-blue-700">Add</button>
+			</div>
+		</form>
+	}
+}

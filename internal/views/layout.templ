@@ -1,0 +1,181 @@
+package views
+
+// Page is the data envelope every full-page view passes to Layout.
+type Page struct {
+	Title         string
+	ActiveView    string // matches one of the nav items: next, ready, agenda, forecast, project
+	CSRFToken     string
+	HasTaskList   bool   // true on pages that render the #task-list container; flips on the row-focus keybindings in the footer
+	ActiveContext string // bare context name (e.g. "work"); empty when no context is active. Drives the nav pill, title hint, empty-state copy and modal subtitle.
+	Contexts      []NamedContext
+}
+
+// NamedContext is the per-render shape of one defined context for the nav
+// dropdown. It's a thin pruning of tw.Context (which the views package can't
+// import because of the dependency direction) - the handler converts.
+type NamedContext struct {
+	Name   string
+	Active bool
+}
+
+templ Layout(p Page) {
+	<!DOCTYPE html>
+	<html lang="en">
+		<head>
+			<meta charset="UTF-8"/>
+			<meta name="viewport" content="width=device-width, initial-scale=1"/>
+			<meta name="csrf-token" content={ p.CSRFToken }/>
+			<title>{ titleWithContext(p.Title, p.ActiveContext) }</title>
+			<link rel="icon" type="image/svg+xml" href="/static/favicon.svg"/>
+			<link rel="stylesheet" href="/static/app.css"/>
+			<script src="/static/theme.js"></script>
+			<script src="/static/htmx.min.js" defer></script>
+			<!-- App scripts are split per-feature under /static/js/. core_*.js
+			     sets up cross-feature plumbing (CSRF, confirm dialog, modal
+			     lifecycle, refresh, theme); the rest are independent feature
+			     modules. All `defer` so they execute in source order after
+			     parse and before DOMContentLoaded. Loaded individually rather
+			     than concatenated so cache hits are per-file and the browser
+			     shows them per-source in DevTools. -->
+			<script src="/static/js/core_refresh.js" defer></script>
+			<script src="/static/js/core_csrf.js" defer></script>
+			<script src="/static/js/core_confirm.js" defer></script>
+			<script src="/static/js/core_modal_close.js" defer></script>
+			<script src="/static/js/core_refresh_modal.js" defer></script>
+			<script src="/static/js/core_dialog_open.js" defer></script>
+			<script src="/static/js/core_dismiss.js" defer></script>
+			<script src="/static/js/core_theme.js" defer></script>
+			<script src="/static/js/keys.js" defer></script>
+			<script src="/static/js/bulk.js" defer></script>
+			<script src="/static/js/search.js" defer></script>
+			<script src="/static/js/sort.js" defer></script>
+			<script src="/static/js/row_expand.js" defer></script>
+			<script src="/static/js/context_pill.js" defer></script>
+			<script src="/static/js/context_picker.js" defer></script>
+			<script src="/static/js/autocomplete.js" defer></script>
+			<script src="/static/js/deps.js" defer></script>
+			<script src="/static/js/form_validation.js" defer></script>
+		</head>
+		<body class="bg-zinc-50 text-zinc-900 antialiased min-h-screen dark:bg-zinc-950 dark:text-zinc-100">
+			<main class="container mx-auto max-w-5xl p-6">
+				<header class="mb-4 flex items-baseline justify-between">
+					<a href="/" class="text-2xl font-semibold tracking-tight">taskwarrior-web</a>
+					<div class="flex items-baseline gap-3">
+						@themeToggle()
+					</div>
+				</header>
+				@Nav(p.ActiveView, p.ActiveContext, p.Contexts)
+				if p.ActiveContext != "" {
+					<div class={ NavRuleClass(ColourForContext(p.ActiveContext)) } aria-hidden="true"></div>
+				}
+				<section>
+					{ children... }
+				</section>
+				@keyHint(p)
+			</main>
+			<div id="modal"></div>
+			@confirmDialog()
+			@helpDialog()
+		</body>
+	</html>
+}
+
+// keyHint is a small always-visible footer surfacing the bindings that ARE
+// useful on the current page. RowListOnly entries (j/k/Enter/x/Space) are
+// gated on p.HasTaskList; the others render on every page. The list lives
+// in the views.Keybindings slice so this footer and helpDialog stay in sync.
+templ keyHint(p Page) {
+	<footer class="mt-12 flex flex-wrap items-center gap-x-3 gap-y-2 border-t border-zinc-200 pt-3 text-xs text-zinc-400 dark:border-zinc-800 dark:text-zinc-500">
+		for _, kb := range Keybindings {
+			if kb.InFooter && (!kb.RowListOnly || p.HasTaskList) {
+				@kh(kb.Key, kb.FooterLabel)
+			}
+		}
+	</footer>
+}
+
+templ kh(key, label string) {
+	<span class="inline-flex items-center gap-1">
+		<kbd class="rounded border border-zinc-200 bg-white px-1 py-0.5 font-mono text-[10px] text-zinc-600 dark:border-zinc-700 dark:bg-zinc-800 dark:text-zinc-300">{ key }</kbd>
+		<span>{ label }</span>
+	</span>
+}
+
+// themeToggle is the header light/dark switch. Both icons are inlined so we
+// don't need a second HTTP request; CSS shows the moon in light mode and the
+// sun in dark mode (the .dark class on <html> flips them via dark: variants).
+// The click handler in app.js (delegated on .theme-toggle) flips the class
+// and writes localStorage.
+templ themeToggle() {
+	<button
+		type="button"
+		class="theme-toggle inline-flex h-7 w-7 items-center justify-center rounded text-zinc-500 hover:bg-zinc-100 hover:text-zinc-900 focus:outline-none focus:ring-2 focus:ring-blue-500 dark:text-zinc-400 dark:hover:bg-zinc-800 dark:hover:text-zinc-100"
+		aria-label="Toggle dark mode"
+		title="Toggle dark mode"
+	>
+		<svg class="h-4 w-4 dark:hidden" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+			<path d="M21 12.79A9 9 0 1 1 11.21 3 7 7 0 0 0 21 12.79z"></path>
+		</svg>
+		<svg class="hidden h-4 w-4 dark:block" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+			<circle cx="12" cy="12" r="4"></circle>
+			<path d="M12 2v2"></path>
+			<path d="M12 20v2"></path>
+			<path d="m4.93 4.93 1.41 1.41"></path>
+			<path d="m17.66 17.66 1.41 1.41"></path>
+			<path d="M2 12h2"></path>
+			<path d="M20 12h2"></path>
+			<path d="m6.34 17.66-1.41 1.41"></path>
+			<path d="m19.07 4.93-1.41 1.41"></path>
+		</svg>
+	</button>
+}
+
+// confirmDialog is a single shared <dialog> wired in app.js to replace HTMX's
+// native window.confirm() with a styled modal. The htmx:confirm event sets
+// the message and shows it; the form's "confirm" button issues the request.
+templ confirmDialog() {
+	<dialog id="confirm-dialog" class="w-full max-w-sm rounded-lg p-0 shadow-xl backdrop:bg-black/40 dark:bg-zinc-900 dark:text-zinc-100">
+		<form method="dialog" class="flex flex-col">
+			<div class="px-5 py-4">
+				<p id="confirm-message" class="text-sm text-zinc-800 dark:text-zinc-200"></p>
+			</div>
+			<div class="flex items-center justify-end gap-2 border-t border-zinc-200 px-4 py-3 dark:border-zinc-700">
+				<button value="cancel" class="rounded px-3 py-1.5 text-sm text-zinc-600 hover:bg-zinc-100 dark:text-zinc-300 dark:hover:bg-zinc-800">Cancel</button>
+				<button value="confirm" autofocus class="rounded bg-blue-600 px-3 py-1.5 text-sm font-medium text-white hover:bg-blue-700">Confirm</button>
+			</div>
+		</form>
+	</dialog>
+}
+
+// helpDialog lists keybindings. Triggered by `?` in app.js. Plain <form
+// method="dialog"> so Esc + the Close button both dismiss it.
+templ helpDialog() {
+	<dialog id="help-dialog" class="w-full max-w-md rounded-lg p-0 shadow-xl backdrop:bg-black/40 dark:bg-zinc-900 dark:text-zinc-100">
+		<form method="dialog" class="flex flex-col">
+			<div class="border-b border-zinc-200 px-5 py-3 dark:border-zinc-700">
+				<h2 class="text-base font-semibold text-zinc-900 dark:text-zinc-100">Keybindings</h2>
+			</div>
+			<div class="px-5 py-4">
+				<table class="w-full text-sm text-zinc-800 dark:text-zinc-200">
+					<tbody class="divide-y divide-zinc-100 dark:divide-zinc-800">
+						for _, kb := range Keybindings {
+							@helpRow(kb.Key, kb.HelpDesc)
+						}
+					</tbody>
+				</table>
+			</div>
+			<div class="flex items-center justify-end gap-2 border-t border-zinc-200 px-4 py-3 dark:border-zinc-700">
+				<button value="ok" autofocus class="rounded bg-blue-600 px-3 py-1.5 text-sm font-medium text-white hover:bg-blue-700">Close</button>
+			</div>
+		</form>
+	</dialog>
+}
+
+templ helpRow(key, desc string) {
+	<tr>
+		<td class="w-24 py-1.5 align-top">
+			<kbd class="rounded border border-zinc-300 bg-zinc-100 px-1.5 py-0.5 font-mono text-xs text-zinc-700 dark:border-zinc-600 dark:bg-zinc-800 dark:text-zinc-200">{ key }</kbd>
+		</td>
+		<td class="py-1.5 text-zinc-700 dark:text-zinc-300">{ desc }</td>
+	</tr>
+}

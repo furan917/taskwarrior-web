@@ -1,0 +1,33 @@
+package views
+
+import (
+	"fmt"
+
+	"github.com/furan917/taskwarrior-web/internal/tw"
+)
+
+templ DonePage(p Page, tasks []tw.Task, days int) {
+	@Layout(p) {
+		<div class="mb-3 flex items-baseline justify-between">
+			<h2 class="text-lg font-medium">{ fmt.Sprintf("Done · last %d days", days) }</h2>
+			<span class="text-xs text-zinc-500 dark:text-zinc-400">{ fmt.Sprintf("%d completed", len(tasks)) }</span>
+		</div>
+		if len(tasks) == 0 {
+			@emptyCard() {
+				if p.ActiveContext != "" {
+					<p class="text-sm text-zinc-500 dark:text-zinc-400">
+						@contextEmptyState(p.ActiveContext)
+					</p>
+				} else {
+					<p class="text-sm text-zinc-500 dark:text-zinc-400">{ fmt.Sprintf("No tasks completed in the last %d days.", days) }</p>
+				}
+			}
+		} else {
+			<ul class="space-y-2">
+				for _, t := range tasks {
+					@DoneRow(t)
+				}
+			</ul>
+		}
+	}
+}

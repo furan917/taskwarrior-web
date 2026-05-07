@@ -1,0 +1,154 @@
+package views
+
+import "fmt"
+
+// modalShell is the shared <dialog> chrome for ModalAdd and ModalEdit. It
+// renders the dialog wrapper, the standard title row with the close-X
+// button, and yields its children inside the dialog directly after the
+// header. Callers wrap their <form> in modalShell so the dialog/title/close
+// chrome lives in exactly one place.
+//
+// The two modals diverge slightly: ModalAdd has a context picker rendered
+// as a header subtitle. That fits inside the same header div, so we accept
+// it via the header's children block via a separate modalHeader partial.
+// modalShell itself only knows about the wrapper.
+templ modalShell() {
+	<dialog id="task-modal" class={ "w-full " + ModalMaxWidth + " rounded-lg p-0 shadow-xl backdrop:bg-black/40 dark:bg-zinc-900 dark:text-zinc-100" }>
+		{ children... }
+	</dialog>
+}
+
+// modalHeader is the title row + close-X used by both modals. Extracted so
+// the close-X markup lives in one place. The children block renders below
+// the title - ModalAdd uses it to inject the context picker; ModalEdit
+// passes nothing.
+templ modalHeader(title string) {
+	<div class="flex items-start justify-between border-b border-zinc-200 px-4 py-3 dark:border-zinc-700">
+		<div class="flex-1">
+			<h2 class="text-base font-semibold">{ title }</h2>
+			{ children... }
+		</div>
+		<button type="button" data-dismiss-modal class="text-2xl leading-none text-zinc-400 hover:text-zinc-700 dark:text-zinc-500 dark:hover:text-zinc-200" aria-label="Close">×</button>
+	</div>
+}
+
+// contextEmptyState renders the "No tasks match in context 'X'. Clear context
+// to see all." message used on the empty branches of list / done / calendar.
+// Consolidated so the prose lives in one place.
+templ contextEmptyState(name string) {
+	No tasks match in context '{ name }'.
+	<button
+		type="button"
+		hx-post={ contextSetURL }
+		hx-vals='{"name":""}'
+		hx-swap="none"
+		class="ml-1 underline hover:text-zinc-900 dark:hover:text-zinc-100"
+	>Clear context</button>
+	to see all.
+}
+
+// emptyCard is the dashed-border empty-state surface shared by EmptyState
+// (list views) and DonePage's empty branch. The caller passes the message
+// inside; layout-wise it's always the same: centred padding, faded text.
+templ emptyCard() {
+	<div class={ EmptyCardClass() + " p-12 text-center" }>
+		{ children... }
+	</div>
+}
+
+// detailRow is the dt/dd pair used in rowDetailGrid. kind controls the
+// column-pinning so date fields land in their semantic column even when
+// optional fields are missing:
+//
+//   - "" (default): natural flow, used for compact short-pair fields.
+//   - "left":   sm:col-start-1 on dt - dates pinned to columns 1-2.
+//   - "right":  sm:col-start-3 on dt - dates pinned to columns 3-4.
+//   - "long":   sm:col-start-1 on dt + sm:col-span-3 on dd - long fields
+//               (Tags, Notes, Blocked by) span the row.
+//   - "wide":   sm:col-span-3 on dd only - first-row fields (UUID,
+//               Description) where the dt is naturally in column 1.
+//
+// See the comment in rowDetailGrid for why long fields force col-start-1.
+templ detailRow(label, kind string) {
+	switch kind {
+		case "left":
+			<dt class="font-medium text-zinc-700 sm:col-start-1 dark:text-zinc-300">{ label }</dt>
+			<dd>{ children... }
+</dd>
+		case "right":
+			<dt class="font-medium text-zinc-700 sm:col-start-3 dark:text-zinc-300">{ label }</dt>
+			<dd>{ children... }
+</dd>
+		case "long":
+			<dt class="font-medium text-zinc-700 sm:col-start-1 dark:text-zinc-300">{ label }</dt>
+			<dd class="sm:col-span-3">{ children... }
+</dd>
+		case "wide":
+			<dt class="font-medium text-zinc-700 dark:text-zinc-300">{ label }</dt>
+			<dd class="sm:col-span-3">{ children... }
+</dd>
+		default:
+			<dt class="font-medium text-zinc-700 dark:text-zinc-300">{ label }</dt>
+			<dd>{ children... }
+</dd>
+	}
+}
+
+// navArrow is the calendar's prev/next/today nav button. Three call sites
+// in calendar.templ used to repeat the same long class string; one partial
+// keeps the chrome consistent across light + dark modes. Border, padding,
+// hover and dark-mode rules are identical for all three buttons.
+//
+// The original Today button rendered slightly smaller (text-xs font-medium
+// vs the arrows' text-sm). We've consolidated to one style for simplicity;
+// the visual difference is negligible and the consistency gain is worth it.
+templ navArrow(href, label, ariaLabel string) {
+	<a
+		href={ templ.SafeURL(href) }
+		class="rounded border border-zinc-200 bg-white px-2 py-1 text-sm text-zinc-700 hover:bg-zinc-100 dark:border-zinc-800 dark:bg-zinc-900 dark:text-zinc-200 dark:hover:bg-zinc-800"
+		aria-label={ ariaLabel }
+	>{ label }</a>
+}
+
+// Tag and Project render as drilldown links to /tag/{name} and
+// /project/{name} - the same routes the Browse page uses - so the user can
+// click any pill (in the row, the calendar, the done view) and land on the
+// filtered list. Pill styling is preserved; we only swap the wrapping
+// element from <span> to <a>.
+templ Tag(name string) {
+	<a
+		href={ templ.SafeURL("/tag/" + name) }
+		class="inline-flex items-center rounded bg-zinc-200 px-2 py-0.5 text-xs font-medium text-zinc-700 hover:bg-zinc-300 hover:text-zinc-900 focus:outline-none focus:ring-1 focus:ring-blue-500 dark:bg-zinc-700 dark:text-zinc-200 dark:hover:bg-zinc-600 dark:hover:text-zinc-50"
+		title={ "Browse tag +" + name }
+	>+{ name }</a>
+}
+
+templ Project(name string) {
+	if name != "" {
+		<a
+			href={ templ.SafeURL("/project/" + name) }
+			class="inline-flex items-center rounded bg-blue-100 px-2 py-0.5 text-xs font-medium text-blue-800 hover:bg-blue-200 hover:text-blue-900 focus:outline-none focus:ring-1 focus:ring-blue-500 dark:bg-blue-950/60 dark:text-blue-200 dark:hover:bg-blue-900/60 dark:hover:text-blue-100"
+			title={ "Browse project " + name }
+		>{ name }</a>
+	}
+}
+
+templ Due(raw string) {
+	if raw != "" {
+		<span class={ dueBadgeClass(raw) }>
+			{ dueLabel(raw) }
+		</span>
+	}
+}
+
+templ Urgency(score float64) {
+	<div class="h-1.5 w-14 overflow-hidden rounded-full bg-zinc-200 dark:bg-zinc-700" title={ fmt.Sprintf("urgency %.2f", score) }>
+		<div class={ "h-full rounded-full", urgencyBarColour(score) } style={ fmt.Sprintf("width: %.0f%%", urgencyPercent(score)) }></div>
+	</div>
+}
+
+templ Indicator() {
+	<span class="htmx-indicator ml-2 inline-flex items-center text-xs text-zinc-400 dark:text-zinc-500" aria-hidden="true">
+		<span class="animate-pulse">refreshing…</span>
+	</span>
+}

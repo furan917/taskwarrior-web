@@ -1,0 +1,219 @@
+package views
+
+import (
+	"fmt"
+	"time"
+
+	"github.com/furan917/taskwarrior-web/internal/tw"
+)
+
+// CalendarView is the discriminator for the three modes. Strict string set;
+// the handler validates the query param against these constants.
+const (
+	CalendarMonth = "month"
+	CalendarWeek  = "week"
+	CalendarDay   = "day"
+)
+
+// CalendarChip is one task rendered on one day cell. Position controls how
+// the chip's corners are rounded so a multi-day span reads as a continuous
+// bar across the per-cell chips.
+type CalendarChip struct {
+	Task     tw.Task
+	Position string // "single", "start", "middle", "end"
+}
+
+// CalendarCell is one day in the rendered grid.
+type CalendarCell struct {
+	Date     time.Time // local zone, midnight
+	InPeriod bool      // false for the prior/next-month padding cells in month view
+	IsToday  bool
+	Chips    []CalendarChip
+}
+
+// CalendarPage is the data envelope for the calendar view. The handler
+// pre-computes everything; the template is purely declarative.
+type CalendarPage struct {
+	Page     Page
+	View     string    // CalendarMonth / CalendarWeek / CalendarDay
+	Anchor   time.Time // the date the user navigated to
+	Title    string    // "May 2026" / "Week of 4 May 2026" / "Mon 5 May 2026"
+	PrevURL  string
+	NextURL  string
+	TodayURL string
+
+	// Cells is the rendered grid. Month: 35 or 42 cells. Week: 7. Day: 1.
+	Cells []CalendarCell
+
+	// DayTasks is populated only for CalendarDay mode: the full list of tasks
+	// active on Anchor. The cells slice still holds 1 cell with chips for
+	// completeness, but the day view renders DayTasks as a richer list.
+	DayTasks []tw.Task
+}
+
+// Calendar renders the calendar page. Picks the inner template by View.
+templ Calendar(p CalendarPage) {
+	@Layout(p.Page) {
+		<div class="mb-4 flex flex-wrap items-center gap-2">
+			@navArrow(p.PrevURL, "←", "Previous")
+			@navArrow(p.NextURL, "→", "Next")
+			@navArrow(p.TodayURL, "Today", "Today")
+			<h2 class="ml-2 text-lg font-medium">{ p.Title }</h2>
+			<div class="ml-auto inline-flex overflow-hidden rounded border border-zinc-200 bg-white text-sm dark:border-zinc-800 dark:bg-zinc-900">
+				@calendarSwitchLink(p, CalendarMonth, "Month")
+				@calendarSwitchLink(p, CalendarWeek, "Week")
+				@calendarSwitchLink(p, CalendarDay, "Day")
+			</div>
+		</div>
+		switch p.View {
+			case CalendarMonth:
+				@calendarMonth(p)
+			case CalendarWeek:
+				@calendarWeek(p)
+			case CalendarDay:
+				@calendarDay(p)
+		}
+	}
+}
+
+templ calendarSwitchLink(p CalendarPage, mode, label string) {
+	if p.View == mode {
+		<span class="bg-zinc-900 px-3 py-1 font-medium text-white dark:bg-zinc-100 dark:text-zinc-900">{ label }</span>
+	} else {
+		<a href={ templ.SafeURL(calendarSwitchURL(p, mode)) } class="px-3 py-1 text-zinc-600 hover:bg-zinc-100 dark:text-zinc-300 dark:hover:bg-zinc-800">{ label }</a>
+	}
+}
+
+templ calendarMonth(p CalendarPage) {
+	<div class={ CardClass() + " overflow-hidden" }>
+		<div class="grid grid-cols-7 border-b border-zinc-200 bg-zinc-50 text-xs font-semibold uppercase tracking-wide text-zinc-500 dark:border-zinc-800 dark:bg-zinc-950 dark:text-zinc-400">
+			@calendarHeader("Mon")
+			@calendarHeader("Tue")
+			@calendarHeader("Wed")
+			@calendarHeader("Thu")
+			@calendarHeader("Fri")
+			@calendarHeader("Sat")
+			@calendarHeader("Sun")
+		</div>
+		<div class="grid grid-cols-7">
+			for _, c := range p.Cells {
+				@calendarMonthCell(c)
+			}
+		</div>
+	</div>
+}
+
+templ calendarHeader(label string) {
+	<div class="px-2 py-1.5">{ label }</div>
+}
+
+templ calendarMonthCell(c CalendarCell) {
+	<div class={ calendarCellClass(c) }>
+		<div class="mb-1 flex items-center justify-between">
+			<a
+				href={ templ.SafeURL(calendarDayURL(c.Date)) }
+				class={ calendarDayNumberClass(c) }
+				title="Open day view"
+			>{ fmt.Sprintf("%d", c.Date.Day()) }</a>
+		</div>
+		<div class="space-y-0.5">
+			for i, chip := range c.Chips {
+				if i < 3 {
+					@calendarChip(chip)
+				}
+			}
+			if len(c.Chips) > 3 {
+				<a href={ templ.SafeURL(calendarDayURL(c.Date)) } class="block truncate text-[10px] text-zinc-500 hover:text-zinc-900 dark:text-zinc-400 dark:hover:text-zinc-100">+{ fmt.Sprintf("%d", len(c.Chips)-3) } more</a>
+			}
+		</div>
+	</div>
+}
+
+templ calendarWeek(p CalendarPage) {
+	<div class={ CardClass() + " overflow-hidden" }>
+		<div class="grid grid-cols-7 border-b border-zinc-200 bg-zinc-50 text-xs font-semibold uppercase tracking-wide text-zinc-500 dark:border-zinc-800 dark:bg-zinc-950 dark:text-zinc-400">
+			for _, c := range p.Cells {
+				<div class="px-2 py-1.5">
+					{ c.Date.Format("Mon 2") }
+				</div>
+			}
+		</div>
+		<div class="grid grid-cols-7">
+			for _, c := range p.Cells {
+				@calendarWeekCell(c)
+			}
+		</div>
+	</div>
+}
+
+templ calendarWeekCell(c CalendarCell) {
+	<div class={ calendarWeekCellClass(c) }>
+		<div class="mb-1">
+			<span class={ calendarDayNumberClass(c) }>{ fmt.Sprintf("%d", c.Date.Day()) }</span>
+		</div>
+		<div class="space-y-1">
+			for _, chip := range c.Chips {
+				@calendarChip(chip)
+			}
+		</div>
+	</div>
+}
+
+templ calendarDay(p CalendarPage) {
+	<section class={ CardClass() + " p-4" }>
+		<h3 class="mb-3 text-base font-semibold text-zinc-900 dark:text-zinc-100">{ p.Anchor.Format("Monday 2 January 2006") }</h3>
+		if len(p.DayTasks) == 0 {
+			if p.Page.ActiveContext != "" {
+				<p class={ EmptyCardClass() + " p-6 text-center text-sm text-zinc-500 dark:text-zinc-400" }>
+					@contextEmptyState(p.Page.ActiveContext)
+				</p>
+			} else {
+				<p class={ EmptyCardClass() + " p-6 text-center text-sm text-zinc-500 dark:text-zinc-400" }>Nothing on the calendar for this day.</p>
+			}
+		} else {
+			<ul class="space-y-2">
+				for _, t := range p.DayTasks {
+					<li>
+						<button
+							type="button"
+							hx-get={ rowEditURL(t) }
+							hx-target="#modal"
+							class={ calendarDayTaskClass(t) }
+						>
+							<div class="flex items-start justify-between gap-3">
+								<div class="min-w-0 flex-1">
+									<p class="font-medium text-zinc-900 dark:text-zinc-100">{ t.Description }</p>
+									<div class="mt-1 flex flex-wrap items-center gap-2">
+										@Project(t.Project)
+										for _, tag := range t.Tags {
+											@Tag(tag)
+										}
+										if t.Due != "" {
+											<span class="text-xs text-zinc-500 dark:text-zinc-400">due { dueLabel(t.Due) }</span>
+										}
+									</div>
+								</div>
+								@Urgency(t.Urgency)
+							</div>
+						</button>
+					</li>
+				}
+			</ul>
+		}
+	</section>
+}
+
+// calendarChip is the per-cell chip used in month + week. The Position field
+// shapes the rounded corners so a multi-day span reads as a continuous bar
+// across cells.
+templ calendarChip(c CalendarChip) {
+	<button
+		type="button"
+		hx-get={ rowEditURL(c.Task) }
+		hx-target="#modal"
+		class={ calendarChipClass(c) }
+		title={ c.Task.Description }
+	>
+		<span class="block truncate">{ c.Task.Description }</span>
+	</button>
+}
