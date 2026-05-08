@@ -1,14 +1,14 @@
 package views
 
-templ Nav(active, activeContext string, contexts []NamedContext) {
+templ Nav(active, activeContext string, contexts []NamedContext, builtinReports, customReports []string) {
 	<nav class="mb-6 flex items-center gap-1 border-b border-zinc-200 pb-3 dark:border-zinc-800">
 		@navLink("/ready", "Ready", active == "ready")
 		@navLink("/next", "Next", active == "next")
 		@navLink("/agenda", "Agenda", active == "agenda")
-		@navLink("/forecast", "Forecast", active == "forecast")
 		@navLink("/calendar", "Calendar", active == "calendar")
 		@navLink("/browse", "Browse", active == "browse")
-		@navLink("/done", "Done", active == "done")
+		@navLink("/stats", "Stats", active == "stats")
+		@moreMenu(active, builtinReports, customReports)
 		<span class="ml-auto flex items-center gap-2">
 			@contextPill(activeContext, contexts)
 			<button
@@ -42,15 +42,110 @@ templ navLink(href, label string, active bool) {
 	}
 }
 
+// moreMenu groups the lower-frequency reports (Forecast, Done) plus the
+// curated TW built-ins and any user-defined reports under a single dropdown
+// to keep the top-level nav scannable. Sections are only rendered if non-
+// empty so a user with no custom reports doesn't see an orphan header.
+//
+// Open state is driven by the same generic [data-popover-wrap] / data-open
+// machinery that powers the context pill (see web/static/js/context_pill.js).
+templ moreMenu(active string, builtinReports, customReports []string) {
+	<span class="relative inline-flex" data-popover-wrap>
+		<button
+			type="button"
+			class={ moreTriggerClass(moreActive(active)) }
+			aria-haspopup="menu"
+			aria-label="More reports"
+			data-popover-trigger
+		>
+			<span>More</span>
+			<span class="text-xs opacity-60" aria-hidden="true">▾</span>
+		</button>
+		<div
+			class="absolute left-0 top-full z-30 mt-1 hidden min-w-52 rounded-md border border-zinc-200 bg-white shadow-lg dark:border-zinc-700 dark:bg-zinc-900"
+			role="menu"
+			data-popover-menu
+		>
+			<div class="max-h-96 overflow-y-auto py-1 text-sm">
+				@moreSectionHeader("Lookups")
+				@moreMenuLink("/forecast", "Forecast", active == "forecast")
+				@moreMenuLink("/done", "Done", active == "done")
+				if len(builtinReports) > 0 {
+					@moreSectionHeader("Built-in")
+					for _, name := range builtinReports {
+						@moreMenuLink("/r/"+name, reportDisplayLabel(name), active == "r-"+name)
+					}
+				}
+				if len(customReports) > 0 {
+					@moreSectionHeader("Custom")
+					for _, name := range customReports {
+						@moreMenuLink("/r/"+name, reportDisplayLabel(name), active == "r-"+name)
+					}
+				}
+			</div>
+		</div>
+	</span>
+}
+
+// moreActive flips the More trigger's active styling when any item inside
+// the dropdown matches the current page. This mirrors the navLink active
+// state so users always see "you are inside this menu".
+func moreActive(active string) bool {
+	if active == "forecast" || active == "done" {
+		return true
+	}
+	if len(active) > 2 && active[:2] == "r-" {
+		return true
+	}
+	return false
+}
+
+func moreTriggerClass(active bool) string {
+	if active {
+		return "inline-flex items-center gap-1 rounded bg-zinc-900 px-3 py-1.5 text-sm font-medium text-white dark:bg-zinc-100 dark:text-zinc-900"
+	}
+	return "inline-flex items-center gap-1 rounded px-3 py-1.5 text-sm font-medium text-zinc-600 hover:bg-zinc-100 dark:text-zinc-300 dark:hover:bg-zinc-800"
+}
+
+templ moreSectionHeader(label string) {
+	<div class="px-3 pb-1 pt-2 text-[10px] font-semibold uppercase tracking-wider text-zinc-400 dark:text-zinc-500">{ label }</div>
+}
+
+// moreMenuLink is a plain anchor (not htmx) that closes the popover via the
+// generic data-popover-item delegation before navigating. Using <a> rather
+// than a button means middle-click / cmd-click / "open in new tab" all
+// behave correctly.
+templ moreMenuLink(href, label string, active bool) {
+	<a
+		href={ templ.SafeURL(href) }
+		class={ moreMenuLinkClass(active) }
+		role="menuitem"
+		data-popover-item
+	>
+		{ label }
+		if active {
+			<span class="ml-2 text-xs" aria-hidden="true">✓</span>
+		}
+	</a>
+}
+
+func moreMenuLinkClass(active bool) string {
+	if active {
+		return "block px-3 py-1.5 text-sm font-medium text-zinc-900 bg-zinc-100 dark:bg-zinc-800 dark:text-zinc-100"
+	}
+	return "block px-3 py-1.5 text-sm text-zinc-700 hover:bg-zinc-100 dark:text-zinc-200 dark:hover:bg-zinc-800"
+}
+
 // contextPill renders the persistent-filter indicator + dropdown trigger. The
 // pill switches between an inactive outline-only "all" affordance and a
 // solid coloured-fill active state with a status dot, name, and one-click
 // clear (×).
 //
-// Click handling lives in app.js (delegated): toggling [data-open="1"] on the
-// wrapper opens the sibling dropdown; click-outside / Esc close it.
+// Click handling lives in context_pill.js (delegated): toggling [data-open="1"]
+// on any [data-popover-wrap] opens its sibling dropdown; click-outside / Esc
+// close it. Same primitive powers the More menu above.
 templ contextPill(activeContext string, contexts []NamedContext) {
-	<span class="relative inline-flex" data-context-wrap>
+	<span class="relative inline-flex" data-popover-wrap>
 		if activeContext != "" {
 			@contextPillActive(activeContext)
 		} else {
@@ -67,7 +162,7 @@ templ contextPillActive(name string) {
 		aria-haspopup="menu"
 		aria-label={ "Context: " + name }
 		title={ "Context: " + name + " (click to switch)" }
-		data-context-pill
+		data-popover-trigger
 	>
 		<span class="relative flex h-2 w-2">
 			<span class={ PillDotPingClass(ColourForContext(name)) } aria-hidden="true"></span>
@@ -98,7 +193,7 @@ templ contextPillInactive() {
 		aria-haspopup="menu"
 		aria-label="Context: none"
 		title="Click to choose a context"
-		data-context-pill
+		data-popover-trigger
 	>
 		<svg class="h-3.5 w-3.5 text-zinc-400" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
 			<polygon points="22 3 2 3 10 12.46 10 19 14 21 14 12.46 22 3"></polygon>
@@ -109,14 +204,14 @@ templ contextPillInactive() {
 }
 
 // contextDropdown is the sibling menu shown when the wrapper carries
-// [data-open="1"]. CSS selector in tailwind picks that up; absent that
-// attribute the menu stays display:none. Defined here so the wrapper plus
-// menu are co-located and the JS can treat them as one unit.
+// [data-open="1"]. CSS selector picks that up; absent that attribute the
+// menu stays display:none. Defined here so the wrapper plus menu are
+// co-located and the JS can treat them as one unit.
 templ contextDropdown(activeContext string, contexts []NamedContext) {
 	<div
 		class="absolute right-0 top-full z-30 mt-1 hidden min-w-44 rounded-md border border-zinc-200 bg-white shadow-lg dark:border-zinc-700 dark:bg-zinc-900"
 		role="menu"
-		data-context-menu
+		data-popover-menu
 	>
 		<div class="max-h-72 overflow-y-auto py-1 text-sm">
 			@contextMenuItem("", "(none)", activeContext == "")
@@ -136,7 +231,7 @@ templ contextMenuItem(value, label string, active bool) {
 		hx-vals={ contextMenuVals(value) }
 		hx-swap="none"
 		class={ contextMenuItemClass(active) }
-		data-context-item
+		data-popover-item
 	>
 		{ label }
 		if active {

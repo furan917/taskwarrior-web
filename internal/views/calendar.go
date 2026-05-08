@@ -123,8 +123,13 @@ func calendarDayTaskClass(_ tw.Task) string {
 // Rules:
 //   - No due date: not on the calendar.
 //   - Due only: single-day event (start == end == due).
-//   - Scheduled set and parses earlier than due: scheduled..due.
-//   - Otherwise wait set and parses earlier than due: wait..due.
+//   - Scheduled set and parses earlier than due: scheduled..due, capped at
+//     maxSpanDays so a stale scheduled doesn't paint the whole month.
+//   - Recurring instances ignore Scheduled entirely - TW spawns children
+//     with the parent's literal Scheduled regardless of the instance's
+//     own Due, producing absurd month-long bars (see calendar audit).
+//   - Otherwise wait set and parses earlier than due: wait..due (also
+//     capped).
 //   - Otherwise: collapse to due.
 //
 // Exported because handlers/calendar.go consumes it.
@@ -139,23 +144,43 @@ func TaskSpan(t tw.Task) (time.Time, time.Time, bool) {
 	end := DateOnly(due.Local())
 
 	start := end
-	if t.Scheduled != "" {
+	// Recurring tasks (parent or instance) get a single-day chip. TW's
+	// recurrence engine doesn't reliably offset Scheduled per child, so any
+	// scheduled-precedes-due reading on a recurring row is noise.
+	if !t.IsRecurring() && t.Scheduled != "" {
 		if s, err := tw.ParseTime(t.Scheduled); err == nil && !s.IsZero() {
 			ds := DateOnly(s.Local())
 			if !ds.After(end) {
-				start = ds
+				start = capSpanStart(ds, end)
 			}
 		}
 	}
-	if start.Equal(end) && t.Wait != "" {
+	if !t.IsRecurring() && start.Equal(end) && t.Wait != "" {
 		if wt, err := tw.ParseTime(t.Wait); err == nil && !wt.IsZero() {
 			dw := DateOnly(wt.Local())
 			if dw.Before(end) {
-				start = dw
+				start = capSpanStart(dw, end)
 			}
 		}
 	}
 	return start, end, true
+}
+
+// maxSpanDays caps the rendered length of a multi-day chip so a far-past
+// Scheduled or Wait doesn't paint the entire visible window. 14 days is the
+// agenda horizon - anything longer is far enough out that "actively spanning
+// to today" stops being a useful read.
+const maxSpanDays = 14
+
+// capSpanStart returns start clamped to no more than maxSpanDays before end,
+// preserving the end boundary. Used so a Scheduled six months ago renders as
+// a 14-day lead-in to its Due rather than as a six-month bar.
+func capSpanStart(start, end time.Time) time.Time {
+	cap := end.AddDate(0, 0, -maxSpanDays)
+	if start.Before(cap) {
+		return cap
+	}
+	return start
 }
 
 // SortChipsByUrgency sorts chips in-place by urgency descending so the

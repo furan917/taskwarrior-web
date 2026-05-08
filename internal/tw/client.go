@@ -49,6 +49,7 @@ type Client struct {
 	projects ttlCache[[]string]
 	tags     ttlCache[[]string]
 	contexts ttlCache[[]Context]
+	reports  ttlCache[[]string]
 
 	// filterCache memoises `task _get rc.report.<name>.filter` per name for
 	// the Client's lifetime. Each entry is a *filterEntry whose sync.Once
@@ -219,6 +220,37 @@ func (c *Client) Denotate(ctx context.Context, id, text string) error {
 		return fmt.Errorf("%w: annotation text is required", ErrInvalid)
 	}
 	return c.Run(ctx, id, "denotate", "--", text)
+}
+
+// Start marks a task as actively being worked on (Taskwarrior records the
+// timestamp on the task's `start` field, which then drives the +ACTIVE
+// virtual tag). Idempotent in Taskwarrior - re-starting an already-active
+// task is a no-op.
+func (c *Client) Start(ctx context.Context, id string) error {
+	if !IDPattern.MatchString(id) {
+		return fmt.Errorf("%w: id %q", ErrInvalid, id)
+	}
+	return c.Run(ctx, id, "start")
+}
+
+// Stop clears the `start` timestamp set by Start. Idempotent: stopping an
+// already-stopped task is a no-op in Taskwarrior.
+func (c *Client) Stop(ctx context.Context, id string) error {
+	if !IDPattern.MatchString(id) {
+		return fmt.Errorf("%w: id %q", ErrInvalid, id)
+	}
+	return c.Run(ctx, id, "stop")
+}
+
+// Duplicate is `task <id> duplicate` - clones the task's editable fields
+// (description, project, tags, due/wait/scheduled, UDAs) into a new pending
+// task. Recurrence is NOT carried across; that's a Taskwarrior policy
+// decision and exactly what we want for "create similar task".
+func (c *Client) Duplicate(ctx context.Context, id string) error {
+	if !IDPattern.MatchString(id) {
+		return fmt.Errorf("%w: id %q", ErrInvalid, id)
+	}
+	return c.Run(ctx, id, "duplicate")
 }
 
 // ResolveReportFilter returns the filter expression configured for the named
@@ -405,9 +437,14 @@ func (c *Client) runRaw(ctx context.Context, args []string) ([]byte, error) {
 		if errors.As(waitErr, &exitErr) {
 			exitCode = exitErr.ExitCode()
 		}
+		stdoutTail := out
+		if len(stdoutTail) > stderrTailBytes {
+			stdoutTail = stdoutTail[len(stdoutTail)-stderrTailBytes:]
+		}
 		return out, &TaskExitError{
 			ExitCode: exitCode,
 			Stderr:   string(stderr),
+			Stdout:   string(stdoutTail),
 			Wrapped:  waitErr,
 		}
 	}
@@ -430,7 +467,30 @@ func (c *Client) runRaw(ctx context.Context, args []string) ([]byte, error) {
 type TaskExitError struct {
 	ExitCode int
 	Stderr   string // bounded to stderrTailBytes; never log this verbatim
-	Wrapped  error
+	Stdout   string // bounded to stderrTailBytes; carries TW's user-facing
+	// summary line ("Deleted 0 tasks.", "Modified 1 task.") so callers can
+	// classify a non-zero exit as a real error vs an idempotent no-op.
+	Wrapped error
+}
+
+// noOpExitPattern matches Taskwarrior's "X 0 tasks." summary lines emitted
+// when an operation found no tasks to act on (e.g. trying to delete an
+// already-deleted task, or modify with no changes). For idempotent
+// commands (delete, done, modify) this is functionally success - the
+// desired end state already holds.
+var noOpExitPattern = regexp.MustCompile(`\b(Deleted|Completed|Modified|Updated|Started|Stopped) 0 tasks?\.`)
+
+// IsNoOpExit reports whether err is a TaskExitError whose stdout indicates
+// the requested operation was a no-op because the task was already in the
+// target state. Use this in handlers for idempotent actions to convert a
+// "task is not deletable / Deleted 0 tasks" exit-1 into a quiet success
+// rather than a 500 - the user's intent (gone / done) is already met.
+func IsNoOpExit(err error) bool {
+	var te *TaskExitError
+	if !errors.As(err, &te) {
+		return false
+	}
+	return noOpExitPattern.MatchString(te.Stdout)
 }
 
 func (e *TaskExitError) Error() string {
@@ -454,6 +514,13 @@ func (e *TaskExitError) Unwrap() error { return e.Wrapped }
 var projectListPattern = regexp.MustCompile(`^[a-zA-Z0-9._]+$`)
 var tagListPattern = regexp.MustCompile(`^[a-zA-Z0-9_-]+$`)
 
+// ReportNamePattern is the allowlist for Taskwarrior report names. Used
+// both internally as the discovery filter and by the views layer to
+// validate the {name} URL path param of /r/{name}. Same shape as
+// ContextNamePattern and tagListPattern - letters, digits, dash,
+// underscore.
+var ReportNamePattern = regexp.MustCompile(`^[a-zA-Z0-9_-]+$`)
+
 // virtualTags is the set of Taskwarrior virtual tags - computed at query time
 // from task state, never user-creatable. `task _tags` emits these alongside
 // real user tags so we filter them out of suggest lists where they'd offer
@@ -469,6 +536,24 @@ var virtualTags = map[string]struct{}{
 	"SCHEDULED": {}, "TAGGED": {}, "TEMPLATE": {}, "TODAY": {},
 	"TOMORROW": {}, "UDA": {}, "UNBLOCKED": {}, "UNTIL": {},
 	"WAITING": {}, "WEEK": {}, "YEAR": {}, "YESTERDAY": {},
+}
+
+// ListReports shells `task _reports` and returns the sorted, deduplicated
+// list of report names matching the same shape as Taskwarrior's report
+// names. Used by the views layer to dynamically surface user-defined
+// reports in the nav, replacing the previous hardcoded curatedReportSpecs
+// map (curated specs still drive the four pinned tabs).
+//
+// Names are filtered through ReportNamePattern as defence in depth so a
+// hostile taskrc cannot smuggle filter-fragment characters through report
+// discovery.
+func (c *Client) ListReports(ctx context.Context) ([]string, error) {
+	args := c.argv("_reports")
+	out, err := c.runRaw(ctx, args)
+	if err != nil {
+		return nil, fmt.Errorf("list reports: %w", err)
+	}
+	return filterStringList(string(out), ReportNamePattern), nil
 }
 
 // ListProjects shells `task _projects` and returns the deduplicated, sorted
@@ -539,6 +624,13 @@ func (c *Client) ProjectsCached(ctx context.Context) []string {
 // TagsCached is the tag-side counterpart to ProjectsCached.
 func (c *Client) TagsCached(ctx context.Context) []string {
 	return c.tags.load(ctx, c.ListTags)
+}
+
+// ReportsCached is the reports-side counterpart. Used by the views layer
+// to surface user-defined reports in the nav alongside the curated
+// defaults (Ready / Next / Agenda / Forecast).
+func (c *Client) ReportsCached(ctx context.Context) []string {
+	return c.reports.load(ctx, c.ListReports)
 }
 
 // Undo wraps `task undo`. The safetyArgs prefix already contains

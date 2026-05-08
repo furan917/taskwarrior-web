@@ -190,8 +190,11 @@ func TestViews_Report_NoDependencyBadgeWhenEmpty(t *testing.T) {
 		t.Fatalf("status: %d body=%s", rr.Code, rr.Body.String())
 	}
 	body := rr.Body.String()
-	if strings.Contains(body, "blocked") {
-		t.Errorf("body unexpectedly mentions 'blocked' for a task with no deps: %s", body)
+	// Look for the dependency badge specifically: a bare "blocked"
+	// substring is too coarse now that the nav's "More > Built-in"
+	// dropdown contains a /r/blocked link.
+	if strings.Contains(body, `title="Blocked by other tasks"`) {
+		t.Errorf("body unexpectedly carries blocked-by row badge for a task with no deps")
 	}
 	if strings.Contains(body, "Blocked by") {
 		t.Errorf("body unexpectedly has 'Blocked by' section")

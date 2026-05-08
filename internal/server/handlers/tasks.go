@@ -121,32 +121,102 @@ func (t *Tasks) Modify(w http.ResponseWriter, r *http.Request) {
 	writeRefresh(w)
 }
 
-func (t *Tasks) Done(w http.ResponseWriter, r *http.Request) {
+// idAction wraps the verbatim "validate id from path -> call tw -> 500 on
+// error / refresh on success" shape that Done / Delete / Start / Stop /
+// Duplicate all share. The action func receives the validated id and
+// returns the underlying tw error (or nil). label is used for log lines
+// and the user-facing error body so the response identifies which
+// command failed without leaking internals.
+func (t *Tasks) idAction(w http.ResponseWriter, r *http.Request, label string, action func(ctx context.Context, id string) error) {
 	id := r.PathValue("id")
 	if !tw.IDPattern.MatchString(id) {
 		http.Error(w, "invalid id", http.StatusBadRequest)
 		return
 	}
-	if err := t.TW.Run(r.Context(), id, "done"); err != nil {
-		t.Logger.Error("task done failed", "err", err)
-		http.Error(w, "done failed", http.StatusInternalServerError)
+	if err := action(r.Context(), id); err != nil {
+		// Treat "0 tasks affected" exits as success: the user wanted the
+		// task in the post-action state (deleted, done) and it already
+		// is. A 500 here would mislead - the only thing wrong is that
+		// the operation was a no-op. We log at debug for traceability
+		// and refresh the list so the UI catches up to actual state.
+		if tw.IsNoOpExit(err) {
+			t.Logger.Debug("task "+label+" was no-op", "id", id)
+			writeRefresh(w)
+			return
+		}
+		t.Logger.Error("task "+label+" failed", "err", err)
+		http.Error(w, label+" failed", http.StatusInternalServerError)
 		return
 	}
 	writeRefresh(w)
 }
 
+func (t *Tasks) Done(w http.ResponseWriter, r *http.Request) {
+	t.idAction(w, r, "done", func(ctx context.Context, id string) error {
+		return t.TW.Run(ctx, id, "done")
+	})
+}
+
 func (t *Tasks) Delete(w http.ResponseWriter, r *http.Request) {
-	id := r.PathValue("id")
-	if !tw.IDPattern.MatchString(id) {
-		http.Error(w, "invalid id", http.StatusBadRequest)
-		return
-	}
-	if err := t.TW.Run(r.Context(), id, "delete"); err != nil {
-		t.Logger.Error("task delete failed", "err", err)
-		http.Error(w, "delete failed", http.StatusInternalServerError)
-		return
-	}
-	writeRefresh(w)
+	t.idAction(w, r, "delete", func(ctx context.Context, id string) error {
+		// Cascade: deleting a recurring parent should kill the entire
+		// series, not just the template row. TW leaves spawned children
+		// orphaned (still status:pending) when only the parent is
+		// deleted - that's contrary to the user-facing "Delete series"
+		// affordance, which promises future occurrences will stop.
+		// We look the task up first; if it's the parent template, we
+		// delete every pending child via a parent:<uuid> filter before
+		// deleting the parent itself.
+		//
+		// Race: between Export and the cascade Run, a CLI user could in
+		// principle spawn a fresh child or modify a sibling's status. In
+		// practice TW only spawns instances during a `task` invocation
+		// and we run them sequentially here, so the only realistic loss
+		// is a child created by a separate concurrent CLI call between
+		// these two execs - that child stays orphaned and the user can
+		// re-click Delete-series to clean it up. Best-effort is the
+		// right contract here.
+		//
+		// If Export fails (TW briefly unavailable), we'd silently skip
+		// the cascade and orphan ALL pending children - exactly what
+		// this whole fix exists to prevent. Log at warn so flak shows up
+		// in diagnostics, but still proceed to the parent delete so the
+		// user-facing action isn't blocked on a transient.
+		if tasks, err := t.TW.Export(ctx, id); err != nil {
+			t.Logger.Warn("delete-series: pre-cascade lookup failed; skipping child cleanup", "id", id, "err", err)
+		} else if len(tasks) == 1 && tasks[0].IsRecurringParent() {
+			// "parent:<uuid>" matches only spawned children, never the
+			// parent itself (the parent's `parent` field is empty), so
+			// this is safe to run before the parent's own delete.
+			// status:pending alone covers the visible cases; status:
+			// waiting/completed/deleted children are left as-is so we
+			// don't churn TW's archive.
+			if cerr := t.TW.Run(ctx, "parent:"+id, "status:pending", "delete"); cerr != nil && !tw.IsNoOpExit(cerr) {
+				t.Logger.Error("delete-series: cascade to children failed", "parent", id, "err", cerr)
+			}
+		}
+		return t.TW.Run(ctx, id, "delete")
+	})
+}
+
+// Start marks the task as actively being worked on (Taskwarrior records the
+// timestamp on `start` and surfaces +ACTIVE). Idempotent: re-starting an
+// already-active task is a no-op in Taskwarrior.
+func (t *Tasks) Start(w http.ResponseWriter, r *http.Request) {
+	t.idAction(w, r, "start", t.TW.Start)
+}
+
+// Stop clears the `start` timestamp set by Start. Idempotent.
+func (t *Tasks) Stop(w http.ResponseWriter, r *http.Request) {
+	t.idAction(w, r, "stop", t.TW.Stop)
+}
+
+// Duplicate clones a task's editable fields into a new pending task via
+// `task <id> duplicate`. Recurrence is intentionally NOT carried across by
+// Taskwarrior, which is exactly what we want for "create similar task" -
+// the user can edit the new instance afterwards.
+func (t *Tasks) Duplicate(w http.ResponseWriter, r *http.Request) {
+	t.idAction(w, r, "duplicate", t.TW.Duplicate)
 }
 
 // maxBulkIDs caps the number of ids accepted in a single bulk request. The
@@ -381,6 +451,8 @@ func readAddInput(r *http.Request) tw.AddInput {
 		Due:         r.FormValue("due"),
 		Wait:        r.FormValue("wait"),
 		Scheduled:   r.FormValue("scheduled"),
+		Recur:       r.FormValue("recur"),
+		Until:       r.FormValue("until"),
 		Depends:     splitCSV(r.FormValue("depends")),
 	}
 }

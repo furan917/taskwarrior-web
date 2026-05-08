@@ -97,6 +97,13 @@ func taskURL(t tw.Task) string { return "/tasks/" + taskKey(t) }
 func taskAnnotateURL(t tw.Task) string { return taskURL(t) + "/annotate" }
 func taskDenotateURL(t tw.Task) string { return taskURL(t) + "/denotate" }
 
+// taskStartURL / taskStopURL toggle the active state. taskDuplicateURL
+// clones the task via `task <id> duplicate`. All three are POST endpoints
+// under taskURL.
+func taskStartURL(t tw.Task) string     { return taskURL(t) + "/start" }
+func taskStopURL(t tw.Task) string      { return taskURL(t) + "/stop" }
+func taskDuplicateURL(t tw.Task) string { return taskURL(t) + "/duplicate" }
+
 // contextSetURL is the POST endpoint the context dropdown / clear-x targets.
 // One named constant beats sprinkling the literal "/context" through five
 // templ files.

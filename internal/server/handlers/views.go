@@ -32,14 +32,30 @@ type reportSpec struct {
 	active string
 }
 
-var reportSpecs = map[string]reportSpec{
+// curatedReportSpecs holds the four reports the UI surfaces in its main
+// nav. They get fixed URLs (/ready, /next, /agenda, /forecast) and
+// curated titles. "next" and "ready" override Taskwarrior's stored
+// filters with crafted ones the web view needs; "agenda" and "forecast"
+// prefer the user's own taskrc filter when present and fall back to
+// these defaults.
+//
+// Any OTHER report defined in the user's taskrc surfaces dynamically via
+// `/r/<name>` - see ReportByName below.
+var curatedReportSpecs = map[string]reportSpec{
 	// Next is the broad pending umbrella (urgency-sorted, top 50). The OR
 	// clause catches lapsed-wait tasks that Taskwarrior 3.x with taskchampion
-	// hasn't auto-promoted in storage yet — pure query-time fix, no writes.
-	"next": {"(status:pending or (status:waiting and wait.before:now)) limit:50", "Next", "next"},
+	// hasn't auto-promoted in storage yet - pure query-time fix, no writes.
+	"next":     {"(status:pending or (status:waiting and wait.before:now)) limit:50", "Next", "next"},
 	"ready":    {"+READY", "Ready", "ready"},
 	"agenda":   {"(status:pending or status:waiting) (due.before:14d or wait.before:14d)", "Agenda · 14 days", "agenda"},
 	"forecast": {"(status:pending or status:waiting) (due.before:30d or wait.before:30d)", "Forecast · 30 days", "forecast"},
+	// /r/recurring overrides TW's stock report.recurring filter (which
+	// surfaces both parents and pending children) to show ONLY parent
+	// templates. The page is the "manage your recurring series" surface;
+	// instances are reachable through the regular /next, /agenda, etc.
+	// Slug uses "r-recurring" so it lights up under "More ▾" rather than
+	// the curated four (which use bare slugs).
+	"recurring": {"status:recurring", "Recurring", "r-recurring"},
 }
 
 // reportFilterTimeout aliases config.ReportFilterTimeout to keep the
@@ -47,13 +63,12 @@ var reportSpecs = map[string]reportSpec{
 // config package.
 const reportFilterTimeout = config.ReportFilterTimeout
 
-// specForReport returns the report spec with its filter resolved against
-// .taskrc for "agenda" and "forecast"; for other reports the static filter is
-// returned as-is. The first call per report name shells `task _get
-// rc.report.<name>.filter` (cached on tw.Client); empty/error responses fall
-// back to the hardcoded spec filter.
+// specForReport returns the report spec for one of the curated four,
+// preferring the user's taskrc filter for agenda/forecast where it exists.
+// Returns ok=false for any other name; dynamic reports go through
+// dynamicReportSpec instead.
 func (v *Views) specForReport(name string) (reportSpec, bool) {
-	spec, ok := reportSpecs[name]
+	spec, ok := curatedReportSpecs[name]
 	if !ok {
 		return reportSpec{}, false
 	}
@@ -68,30 +83,122 @@ func (v *Views) specForReport(name string) (reportSpec, bool) {
 	return spec, true
 }
 
+// builtinReportNames is the curated subset of Taskwarrior's stock reports
+// surfaced under the nav's "More > Built-in" section. Filters come from
+// ReportFilterCached at request time so we don't duplicate TW's own
+// definitions; if the user has redefined any of these in ~/.taskrc the
+// override wins automatically. The full TW set is much larger (~25
+// reports including list/long/ls/minimal/all/completed/...) but most are
+// noisy or redundant against the curated five top-level tabs - this
+// shortlist is the useful subset that actually answers a different
+// question than the top-level views.
+// "recurring" is in BOTH this list AND curatedReportSpecs. The curated
+// entry overrides TW's stock report.recurring filter (which conflates
+// parents and children) with status:recurring (templates only); keeping
+// it here ensures it still surfaces in the More dropdown alongside its
+// peers. customReports() dedupes against curatedReportSpecs so it never
+// ends up in the Custom section.
+var builtinReportNames = []string{"blocked", "overdue", "waiting", "recurring", "active"}
+
+// isBuiltinReport reports whether name is in the curated TW built-in set.
+// Used both to admit /r/<name> routes for built-ins and to exclude them
+// from the "Custom" dropdown section (since they get their own header).
+func isBuiltinReport(name string) bool {
+	for _, n := range builtinReportNames {
+		if n == name {
+			return true
+		}
+	}
+	return false
+}
+
+// dynamicReportSpec resolves a report name to a reportSpec when the name is
+// either (a) in the curated built-in shortlist or (b) discovered from the
+// user's taskrc via ReportsCached. Returns ok=false otherwise (defence in
+// depth - rejects names that pass the URL pattern but aren't actually
+// defined). Filter comes from ReportFilterCached; title is the capitalised
+// name. The active slug is "r-<name>" so the nav highlight stays distinct
+// from the curated four.
+func (v *Views) dynamicReportSpec(ctx context.Context, name string) (reportSpec, bool) {
+	known := isBuiltinReport(name)
+	if !known {
+		for _, n := range v.TW.ReportsCached(ctx) {
+			if n == name {
+				known = true
+				break
+			}
+		}
+	}
+	if !known {
+		return reportSpec{}, false
+	}
+	filterCtx, cancel := context.WithTimeout(ctx, reportFilterTimeout)
+	defer cancel()
+	// An empty filter is fine: report defined but with no filter clause
+	// (custom report using default columns/sort). exportWithContext still
+	// applies the active context, so we pass it through unchanged.
+	filter := v.TW.ReportFilterCached(filterCtx, name)
+	return reportSpec{
+		filter: filter,
+		title:  strings.ToUpper(name[:1]) + name[1:],
+		active: "r-" + name,
+	}, true
+}
+
 func (v *Views) Home(w http.ResponseWriter, r *http.Request) {
 	http.Redirect(w, r, "/ready", http.StatusFound)
 }
 
-// Report returns a handler for one of the named reports.
+// Report returns a handler for one of the curated reports.
 func (v *Views) Report(name string) http.HandlerFunc {
-	if _, ok := reportSpecs[name]; !ok {
+	if _, ok := curatedReportSpecs[name]; !ok {
 		return func(w http.ResponseWriter, r *http.Request) {
 			http.NotFound(w, r)
 		}
 	}
 	return func(w http.ResponseWriter, r *http.Request) {
 		spec, _ := v.specForReport(name)
-		tasks, err := v.fetch(r, spec.filter)
-		if err != nil {
-			v.Logger.Error("report fetch failed", "report", name, "err", err)
-			http.Error(w, "task export failed", http.StatusInternalServerError)
-			return
-		}
-		page := v.buildPage(r, spec.title, spec.active, true)
-		renderHTML(w, r, "Report",
-			views.ListPage(page, name, "", tasks, views.ParseSort(r.URL.Query())),
-			v.Logger, "report", name)
+		v.renderReport(w, r, name, spec)
 	}
+}
+
+// ReportByName handles `/r/{name}` for any user-defined report discovered
+// in the taskrc. Curated reports stay on their dedicated paths so existing
+// bookmarks keep working; this route surfaces everything else.
+func (v *Views) ReportByName(w http.ResponseWriter, r *http.Request) {
+	name := r.PathValue("name")
+	if !tw.ReportNamePattern.MatchString(name) {
+		http.Error(w, "invalid report name", http.StatusBadRequest)
+		return
+	}
+	// Prefer curated spec when the name overlaps - keeps semantics
+	// consistent whether the user lands on /ready or /r/ready.
+	if spec, ok := v.specForReport(name); ok {
+		v.renderReport(w, r, name, spec)
+		return
+	}
+	spec, ok := v.dynamicReportSpec(r.Context(), name)
+	if !ok {
+		http.NotFound(w, r)
+		return
+	}
+	v.renderReport(w, r, name, spec)
+}
+
+// renderReport is the shared body of Report and ReportByName: fetch with
+// the spec's filter, sort, render via ListPage. Pulled out so the two
+// entry points stay one-liners.
+func (v *Views) renderReport(w http.ResponseWriter, r *http.Request, name string, spec reportSpec) {
+	tasks, err := v.fetch(r, spec.filter)
+	if err != nil {
+		v.Logger.Error("report fetch failed", "report", name, "err", err)
+		http.Error(w, "task export failed", http.StatusInternalServerError)
+		return
+	}
+	page := v.buildPage(r, spec.title, spec.active, true)
+	renderHTML(w, r, "Report",
+		views.ListPage(page, name, "", tasks, views.ParseSort(r.URL.Query())),
+		v.Logger, "report", name)
 }
 
 // Labels lists every project and every tag currently attached to open
@@ -135,14 +242,17 @@ func sortedCounted(m map[string]int) []views.Counted {
 	return out
 }
 
-// Tag handles /tag/{name} - filters tasks by `+name`.
+// Tag handles /tag/{name} - filters open tasks by `+name`. Status is pinned
+// to pending-or-waiting so deleted instances, completed history, and
+// recurring parents (status:recurring template rows) don't leak into a
+// browse-by-tag list.
 func (v *Views) Tag(w http.ResponseWriter, r *http.Request) {
 	name := r.PathValue("name")
 	if !tw.TagPattern.MatchString(name) {
 		http.Error(w, "invalid tag name", http.StatusBadRequest)
 		return
 	}
-	tasks, err := v.fetch(r, "+"+name)
+	tasks, err := v.fetch(r, "(status:pending or status:waiting) +"+name)
 	if err != nil {
 		v.Logger.Error("tag fetch failed", "tag", name, "err", err)
 		http.Error(w, "task export failed", http.StatusInternalServerError)
@@ -161,7 +271,7 @@ func (v *Views) Project(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "invalid project name", http.StatusBadRequest)
 		return
 	}
-	tasks, err := v.fetch(r, "project:"+name)
+	tasks, err := v.fetch(r, "(status:pending or status:waiting) project:"+name)
 	if err != nil {
 		v.Logger.Error("project fetch failed", "project", name, "err", err)
 		http.Error(w, "task export failed", http.StatusInternalServerError)
@@ -261,13 +371,33 @@ func (v *Views) fetch(r *http.Request, filter string) ([]tw.Task, error) {
 func (v *Views) buildPage(r *http.Request, title, activeView string, hasTaskList bool) views.Page {
 	active := activeContext(v.TW, r)
 	return views.Page{
-		Title:         title,
-		ActiveView:    activeView,
-		CSRFToken:     csrfToken(r),
-		HasTaskList:   hasTaskList,
-		ActiveContext: active,
-		Contexts:      namedContextsForRender(v.TW, r, active),
+		Title:          title,
+		ActiveView:     activeView,
+		CSRFToken:      csrfToken(r),
+		HasTaskList:    hasTaskList,
+		ActiveContext:  active,
+		Contexts:       namedContextsForRender(v.TW, r, active),
+		BuiltinReports: builtinReportNames,
+		CustomReports:  customReports(v.TW.ReportsCached(r.Context())),
 	}
+}
+
+// customReports filters the cached report list down to user-defined entries:
+// anything beyond the curated four (next/ready/agenda/forecast) AND beyond
+// the built-in shortlist (those get their own dropdown section). Order is
+// preserved from filterStringList so names appear alphabetically.
+func customReports(all []string) []string {
+	out := make([]string, 0, len(all))
+	for _, n := range all {
+		if _, curated := curatedReportSpecs[n]; curated {
+			continue
+		}
+		if isBuiltinReport(n) {
+			continue
+		}
+		out = append(out, n)
+	}
+	return out
 }
 
 // activeContextFilter returns the read filter of the currently-active
@@ -357,4 +487,114 @@ func (v *Views) Done(w http.ResponseWriter, r *http.Request) {
 	})
 	page := v.buildPage(r, fmt.Sprintf("Done · last %d days", days), "done", false)
 	renderHTML(w, r, "Done", views.DonePage(page, tasks, days), v.Logger)
+}
+
+// Stats renders the dashboard at /stats: count cards (pending / waiting /
+// overdue / active / blocked / recurring + completed-7d / -30d) and a
+// completion-history bar chart for the last `statsHistoryDays` days. Two
+// Export calls back the page - one for open tasks, one for completed in
+// the chart window. Everything else is computed in Go from those slices
+// to keep wall time low.
+const statsHistoryDays = 14
+
+func (v *Views) Stats(w http.ResponseWriter, r *http.Request) {
+	open, err := v.exportWithContext(r, "(status:pending or status:waiting)")
+	if err != nil {
+		v.Logger.Error("stats: open fetch failed", "err", err)
+		http.Error(w, "task export failed", http.StatusInternalServerError)
+		return
+	}
+	completed, err := v.exportWithContext(r, "status:completed", fmt.Sprintf("end.after:now-%dd", statsHistoryDays))
+	if err != nil {
+		v.Logger.Error("stats: completed fetch failed", "err", err)
+		http.Error(w, "task export failed", http.StatusInternalServerError)
+		return
+	}
+	// Recurring count needs a separate query: parents are status:recurring
+	// (excluded from the open pool) and that's what users mean by "active
+	// recurring series" - not "pending instances that happen to carry a
+	// recur field". exportWithContext applies the active context filter so
+	// /stats stays scoped consistently with the other tabs.
+	recurring, err := v.exportWithContext(r, "status:recurring")
+	if err != nil {
+		v.Logger.Error("stats: recurring fetch failed", "err", err)
+		http.Error(w, "task export failed", http.StatusInternalServerError)
+		return
+	}
+	stats := computeStats(open, completed, statsHistoryDays)
+	stats.Recurring = len(recurring)
+	page := v.buildPage(r, "Stats", "stats", false)
+	renderHTML(w, r, "Stats", views.StatsPage(page, stats), v.Logger)
+}
+
+// computeStats derives every count + the per-day history slice from the
+// two Export results. Pure function so tests can drive it without a fake
+// binary - the only impurity is `now`, which we capture once at entry so
+// the cutoffs and the History day labels all line up.
+//
+// open: every task with status pending or waiting (the work-in-progress
+// pool). completed: every task with status:completed end.after:now-Nd.
+// days: the trailing window for the in-window count + per-day chart.
+func computeStats(open, completed []tw.Task, days int) views.Stats {
+	now := time.Now()
+	cutoff7 := now.Add(-7 * 24 * time.Hour)
+	cutoffWindow := now.Add(-time.Duration(days) * 24 * time.Hour)
+
+	s := views.Stats{WindowDays: days}
+
+	for _, t := range open {
+		switch t.Status {
+		case "pending":
+			s.Pending++
+		case "waiting":
+			s.Waiting++
+		}
+		if t.IsOverdue() {
+			s.Overdue++
+		}
+		if t.IsActive() {
+			s.Active++
+		}
+		// Recurring count is set by Stats() from a dedicated status:recurring
+		// query; the open-pool loop does NOT increment it. Counting pending
+		// children here would conflate "active recurring series" with "open
+		// instances that happen to carry an inherited recur field".
+		if len(t.Depends) > 0 {
+			s.Blocked++
+		}
+	}
+
+	// Bucket completed tasks per local-time day. Bucket key is the local
+	// YYYY-MM-DD so we line up with the day labels the chart renders.
+	buckets := make(map[string]int, days)
+	for _, t := range completed {
+		end, err := tw.ParseTime(t.Modified)
+		if err != nil || end.IsZero() {
+			continue
+		}
+		if end.Before(cutoffWindow) {
+			continue
+		}
+		if end.After(cutoff7) {
+			s.Completed7d++
+		}
+		s.CompletedInWindow++
+		buckets[end.Local().Format("2006-01-02")]++
+	}
+
+	// History lands newest-first (today at index 0, day-N-back at index N).
+	// completionChartSVG reverses to oldest-first for left-to-right
+	// rendering; we keep the handler-side order conventional so other
+	// future consumers don't have to re-reverse.
+	s.History = make([]views.DayCount, 0, days)
+	for i := range days {
+		day := now.AddDate(0, 0, -i)
+		key := day.Format("2006-01-02")
+		s.History = append(s.History, views.DayCount{
+			Label: day.Format("1/2"),
+			Date:  key,
+			Count: buckets[key],
+		})
+	}
+	return s
 }

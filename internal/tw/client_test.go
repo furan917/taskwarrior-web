@@ -93,6 +93,56 @@ func TestClient_DenotateRejectsEmpty(t *testing.T) {
 	}
 }
 
+// TestClient_StartStopDuplicate_RejectsBadID covers the input-validation
+// guards on the three new control methods. They all share the same shape
+// (validate id, then Run), so one table-test exercises every guard.
+func TestClient_StartStopDuplicate_RejectsBadID(t *testing.T) {
+	c := NewClient()
+	for _, id := range []string{"", "abc", "1; ls", "../etc", "1 2"} {
+		if err := c.Start(context.Background(), id); !errors.Is(err, ErrInvalid) {
+			t.Errorf("Start(%q): expected ErrInvalid, got %v", id, err)
+		}
+		if err := c.Stop(context.Background(), id); !errors.Is(err, ErrInvalid) {
+			t.Errorf("Stop(%q): expected ErrInvalid, got %v", id, err)
+		}
+		if err := c.Duplicate(context.Background(), id); !errors.Is(err, ErrInvalid) {
+			t.Errorf("Duplicate(%q): expected ErrInvalid, got %v", id, err)
+		}
+	}
+}
+
+// TestClient_ListReports_FakeBinary covers the discovery round-trip.
+// Mirrors TestClient_ListProjects_FakeBinary - drops names that fail
+// the allowlist regex (shell metas, leading dashes), dedupes, sorts.
+func TestClient_ListReports_FakeBinary(t *testing.T) {
+	body := `#!/bin/sh
+case "$*" in
+  *"_reports"*)
+    printf 'next\nready\nlatest\nready\nbad name\n+evil\n../etc\noldest\n'
+    ;;
+  *)
+    printf ''
+    ;;
+esac
+exit 0
+`
+	installScript(t, body)
+	c := NewClient()
+	got, err := c.ListReports(context.Background())
+	if err != nil {
+		t.Fatalf("ListReports: %v", err)
+	}
+	want := []string{"latest", "next", "oldest", "ready"}
+	if len(got) != len(want) {
+		t.Fatalf("got %v, want %v", got, want)
+	}
+	for i := range want {
+		if got[i] != want[i] {
+			t.Errorf("got[%d]=%q want %q", i, got[i], want[i])
+		}
+	}
+}
+
 func TestClient_AnnotateRejectsBadID(t *testing.T) {
 	c := NewClient()
 	for _, id := range []string{"", "abc", "1; ls", "../etc", "1 2"} {
@@ -1124,5 +1174,32 @@ exit 1
 	got2 := c.ProjectsCached(context.Background())
 	if len(got2) != 2 {
 		t.Errorf("second call after transient failure: got %v, want prior 2 entries kept", got2)
+	}
+}
+
+// TestIsNoOpExit covers the "TW reported 0 tasks affected" detection used by
+// idempotent action handlers (delete/done/modify) to convert a non-zero
+// exit on an already-in-target-state task into a quiet success rather than
+// a spurious 500. Patterns drawn from real TW 3.x output.
+func TestIsNoOpExit(t *testing.T) {
+	cases := []struct {
+		name   string
+		err    error
+		wantNo bool
+	}{
+		{"deleted-zero", &TaskExitError{ExitCode: 1, Stdout: "Task ac20209b 'X' is not deletable.\nDeleted 0 tasks.\n"}, true},
+		{"completed-zero", &TaskExitError{ExitCode: 1, Stdout: "Completed 0 tasks.\n"}, true},
+		{"modified-zero", &TaskExitError{ExitCode: 1, Stdout: "Modified 0 tasks.\n"}, true},
+		{"deleted-one", &TaskExitError{ExitCode: 0, Stdout: "Deleting task 5 'X'.\nDeleted 1 task.\n"}, false},
+		{"unrelated-error", &TaskExitError{ExitCode: 1, Stdout: "", Stderr: "Could not interpret the date 'x'."}, false},
+		{"non-task-error", errors.New("network down"), false},
+		{"nil", nil, false},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			if got := IsNoOpExit(c.err); got != c.wantNo {
+				t.Errorf("IsNoOpExit(%v) = %v, want %v", c.err, got, c.wantNo)
+			}
+		})
 	}
 }

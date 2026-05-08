@@ -1,0 +1,107 @@
+name: Build
+
+# Triggered on version tags (created by release-please when a release PR
+# is merged) AND manually via workflow_dispatch for ad-hoc builds. The
+# matrix produces statically-linked binaries for every supported target;
+# on a tag run, they're attached to the GitHub release as assets.
+
+on:
+  push:
+    tags: ['v*']
+  workflow_dispatch:
+
+permissions:
+  # Required to upload assets onto a release that release-please created.
+  contents: write
+
+jobs:
+  build:
+    name: build ${{ matrix.goos }}/${{ matrix.goarch }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - { goos: darwin, goarch: amd64 }
+          - { goos: darwin, goarch: arm64 }
+          - { goos: linux,  goarch: amd64 }
+          - { goos: linux,  goarch: arm64 }
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Go
+        uses: actions/setup-go@v5
+        with:
+          go-version: '1.25'
+          cache: true
+
+      - name: Install templ
+        run: go install github.com/a-h/templ/cmd/templ@v0.3.1001
+
+      # Tailwind v4 standalone CLI - we need the Linux build because
+      # this job runs on ubuntu-latest, regardless of the binary's
+      # GOOS/GOARCH target (the CSS produced is platform-independent
+      # and gets embedded into every cross-build via go:embed).
+      - name: Install Tailwind CLI
+        run: |
+          curl -fsSL -o tailwindcss \
+            https://github.com/tailwindlabs/tailwindcss/releases/latest/download/tailwindcss-linux-x64
+          chmod +x tailwindcss
+
+      - name: Generate templates
+        run: templ generate
+
+      - name: Generate CSS
+        run: ./tailwindcss -i web/tailwind.input.css -o web/static/app.css --minify
+
+      # Cross-compile. -ldflags="-s -w" strips DWARF + symbol table for
+      # ~30% smaller binaries; CGO disabled so the result is fully
+      # static and runs on any glibc/musl host of the right arch.
+      - name: Cross-build
+        env:
+          GOOS: ${{ matrix.goos }}
+          GOARCH: ${{ matrix.goarch }}
+          CGO_ENABLED: '0'
+        run: |
+          mkdir -p dist
+          out="dist/taskwarrior-web-${{ matrix.goos }}-${{ matrix.goarch }}"
+          go build -trimpath -ldflags="-s -w" -o "$out" .
+          ls -lh "$out"
+
+      # Tarball pairs the binary with the OS-appropriate install assets
+      # and the README so a release download is self-contained: extract,
+      # `make install` (or run install.sh directly), done.
+      - name: Package release archive
+        if: startsWith(github.ref, 'refs/tags/')
+        run: |
+          tag="${GITHUB_REF#refs/tags/}"
+          stage="taskwarrior-web-${tag}-${{ matrix.goos }}-${{ matrix.goarch }}"
+          mkdir -p "$stage"
+          cp "dist/taskwarrior-web-${{ matrix.goos }}-${{ matrix.goarch }}" "$stage/taskwarrior-web"
+          cp -r scripts deploy README.md LICENSE* "$stage/" 2>/dev/null || true
+          tar -czf "${stage}.tar.gz" "$stage"
+          # SHA256 sidecar for download verification.
+          sha256sum "${stage}.tar.gz" > "${stage}.tar.gz.sha256"
+
+      - name: Upload artifact (manual / non-tag runs)
+        if: ${{ !startsWith(github.ref, 'refs/tags/') }}
+        uses: actions/upload-artifact@v4
+        with:
+          name: taskwarrior-web-${{ matrix.goos }}-${{ matrix.goarch }}
+          path: dist/taskwarrior-web-${{ matrix.goos }}-${{ matrix.goarch }}
+          if-no-files-found: error
+
+      - name: Attach to release
+        if: startsWith(github.ref, 'refs/tags/')
+        uses: softprops/action-gh-release@v2
+        with:
+          files: |
+            taskwarrior-web-*.tar.gz
+            taskwarrior-web-*.tar.gz.sha256
+          # The release was created by release-please when the release
+          # PR merged; we just append our binaries to it. fail_on_unmatched
+          # surfaces a missing-release case loudly.
+          fail_on_unmatched_files: true

@@ -680,3 +680,65 @@ func TestTask_IsOverdue(t *testing.T) {
 		t.Errorf("garbage due should not be overdue")
 	}
 }
+
+// TestRecurPattern_AcceptsFractional: TW accepts "1.5d" / "0.5w" as
+// half-day / half-week durations. The pattern was previously alphanumeric-
+// only and rejected the period, surfacing as an opaque 400 to the user.
+func TestRecurPattern_AcceptsFractional(t *testing.T) {
+	cases := []struct {
+		input string
+		want  bool
+	}{
+		{"weekly", true},
+		{"1mo", true},
+		{"P1W", true},
+		{"1.5d", true},
+		{"0.5w", true},
+		{"P1.5D", true},
+		{"; rm -rf /", false},
+		{"--rc.somefile", false},
+		{"a b", false},
+		{"weekly;ls", false},
+		// Malformed-but-alphanumeric values pass the regex (deliberately
+		// permissive shape filter, see comment on recurPattern); TW's
+		// runtime parser rejects them and writeIfTaskParseError surfaces
+		// the error to the user. Listed here so a regression that
+		// tightened the pattern (e.g. someone changes to require a
+		// digit) is caught as a test break rather than a silent shift.
+		{"..", true},
+		{"1.", true},
+		{".d", true},
+		{"1.2.3.4d", true},
+		// Shell-meta in a fractional context still rejected.
+		{"1.5d;rm", false},
+		{"1.5/foo", false},
+		{"1.5*", false},
+	}
+	for _, c := range cases {
+		if got := recurPattern.MatchString(c.input); got != c.want {
+			t.Errorf("recurPattern(%q) = %v, want %v", c.input, got, c.want)
+		}
+	}
+}
+
+// TestIsRecurringParent: distinguishes templates from instances. Both
+// carry Recur, only the template has Status == "recurring".
+func TestIsRecurringParent(t *testing.T) {
+	parent := Task{Status: "recurring", Recur: "monthly"}
+	child := Task{Status: "pending", Recur: "monthly"}
+	plain := Task{Status: "pending"}
+	deletedChild := Task{Status: "deleted", Recur: "monthly"}
+
+	if !parent.IsRecurringParent() {
+		t.Errorf("parent should be IsRecurringParent")
+	}
+	if child.IsRecurringParent() {
+		t.Errorf("pending child should not be IsRecurringParent")
+	}
+	if plain.IsRecurringParent() {
+		t.Errorf("non-recurring task should not be IsRecurringParent")
+	}
+	if deletedChild.IsRecurringParent() {
+		t.Errorf("deleted child should not be IsRecurringParent")
+	}
+}

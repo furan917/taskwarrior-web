@@ -1,0 +1,96 @@
+package views
+
+import "fmt"
+
+// Stats is the count summary the /stats page renders. Computed from two
+// Export calls in the handler (open + recently-completed); nothing else
+// shells out so the page stays cheap.
+//
+// The "in-window" counts cover the trailing WindowDays days; the chart
+// (History) shows that same window day-by-day. Completed7d is always a
+// 7-day count regardless of window for the at-a-glance card.
+type Stats struct {
+	Pending           int
+	Waiting           int
+	Overdue           int
+	Active            int
+	Recurring         int
+	Blocked           int
+	WindowDays        int // size of the "in window" period the chart + counts cover
+	Completed7d       int // always last 7 days, regardless of window
+	CompletedInWindow int // last WindowDays days
+	History           []DayCount // newest-first (today at History[0]); one entry per day in WindowDays. completionChartSVG reverses to oldest-first for left-to-right rendering.
+}
+
+// DayCount pairs a day label with how many tasks completed on that day.
+// Used by the burndown chart in Phase C.
+type DayCount struct {
+	Label string // short label like "Mon", "5/7"
+	Date  string // ISO YYYY-MM-DD
+	Count int
+}
+
+templ StatsPage(p Page, stats Stats) {
+	@Layout(p) {
+		<div class="mb-3 flex items-baseline justify-between">
+			<h2 class="text-lg font-medium">Stats</h2>
+			<span class="text-xs text-zinc-500 dark:text-zinc-400">live snapshot - refresh to update</span>
+		</div>
+		<div class="grid grid-cols-2 gap-3 sm:grid-cols-3 md:grid-cols-4">
+			@statCard("Pending", stats.Pending, "Open tasks not waiting on a date", "blue")
+			@statCard("Waiting", stats.Waiting, "Surfacing later via wait:", "zinc")
+			@statCard("Overdue", stats.Overdue, "Past their due date", "red")
+			@statCard("Active", stats.Active, "Currently being worked on (+ACTIVE)", "emerald")
+			@statCard("Blocked", stats.Blocked, "Have unmet dependencies", "amber")
+			@statCard("Recurring", stats.Recurring, "Active recurring series", "purple")
+			@statCard("Done · 7d", stats.Completed7d, "Completed in the last 7 days", "emerald")
+			@statCard(fmt.Sprintf("Done · %dd", stats.WindowDays), stats.CompletedInWindow, fmt.Sprintf("Completed in the last %d days", stats.WindowDays), "emerald")
+		</div>
+		if len(stats.History) > 0 {
+			<div class="mt-6">
+				<h3 class="mb-2 text-sm font-medium text-zinc-700 dark:text-zinc-300">Completion history</h3>
+				@completionChart(stats.History)
+			</div>
+		}
+	}
+}
+
+// statCard is one count tile. Tone selects the accent colour; copy is
+// intentionally short - this is a glanceable dashboard, not a report.
+templ statCard(label string, count int, hint, tone string) {
+	<div class={ statCardClass(tone) }>
+		<div class="text-3xl font-semibold tabular-nums">{ fmt.Sprintf("%d", count) }</div>
+		<div class="mt-1 text-xs font-medium uppercase tracking-wide opacity-80">{ label }</div>
+		<div class="mt-1 text-[11px] opacity-70">{ hint }</div>
+	</div>
+}
+
+// statCardClass returns the per-tone Tailwind class string. Card-surface
+// pattern matches CardClass() so light/dark borders stay aligned with the
+// rest of the app; the tone prefix swaps the accent text + background tint.
+func statCardClass(tone string) string {
+	const base = "rounded-lg border p-4"
+	switch tone {
+	case "blue":
+		return base + " border-blue-200 bg-blue-50 text-blue-900 dark:border-blue-900/60 dark:bg-blue-950/40 dark:text-blue-100"
+	case "red":
+		return base + " border-red-200 bg-red-50 text-red-900 dark:border-red-900/60 dark:bg-red-950/40 dark:text-red-100"
+	case "emerald":
+		return base + " border-emerald-200 bg-emerald-50 text-emerald-900 dark:border-emerald-900/60 dark:bg-emerald-950/40 dark:text-emerald-100"
+	case "amber":
+		return base + " border-amber-200 bg-amber-50 text-amber-900 dark:border-amber-900/60 dark:bg-amber-950/40 dark:text-amber-100"
+	case "purple":
+		return base + " border-purple-200 bg-purple-50 text-purple-900 dark:border-purple-900/60 dark:bg-purple-950/40 dark:text-purple-100"
+	default:
+		return base + " border-zinc-200 bg-white text-zinc-900 dark:border-zinc-800 dark:bg-zinc-900 dark:text-zinc-100"
+	}
+}
+
+// completionChart renders a simple SVG bar chart of completed-per-day for
+// the window in stats.History. Server-rendered, no JS, scales to whatever
+// max count is in the window.
+templ completionChart(history []DayCount) {
+	<div class="rounded-lg border border-zinc-200 bg-white p-4 dark:border-zinc-800 dark:bg-zinc-900">
+		@completionChartSVG(history)
+	</div>
+}

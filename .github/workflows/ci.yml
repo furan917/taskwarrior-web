@@ -1,0 +1,132 @@
+name: CI
+
+# Every check is its own job so they run in parallel and EACH reports
+# its own pass/fail status to the PR. A gofmt regression no longer hides
+# the test results, and a flaky test no longer blocks lint feedback. The
+# tradeoff is a few extra setup-go cache restores per push - cheap given
+# the wall-clock saving when reviewing a fail.
+#
+# Per-job timeouts are tight (defaults are 6 hours - that's a runner-bill
+# trap if a step ever wedges).
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+# Cancel an in-flight CI run if a new commit lands on the same branch /
+# PR before it finishes. Saves runner minutes and gets the latest result
+# in front of the reviewer.
+concurrency:
+  group: ci-${{ github.workflow }}-${{ github.head_ref || github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  # tidy: go mod tidy is a no-op on a healthy commit. Catches unused deps
+  # and missing checksums before they hit main.
+  tidy:
+    name: go mod tidy
+    runs-on: ubuntu-latest
+    timeout-minutes: 3
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with: { go-version: '1.25', cache: true }
+      - name: Verify go mod tidy is clean
+        run: |
+          go mod tidy
+          if ! git diff --exit-code go.mod go.sum; then
+            echo "::error::go mod tidy produced changes - commit them"
+            exit 1
+          fi
+
+  # gofmt: hand-written code only. Generated *_templ.go is excluded -
+  # the templ generator already lays out idiomatic Go; if anything is
+  # off there it's a templ-version concern, not ours.
+  fmt:
+    name: gofmt
+    runs-on: ubuntu-latest
+    timeout-minutes: 3
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with: { go-version: '1.25', cache: true }
+      - name: gofmt check
+        run: |
+          unformatted=$(gofmt -l . 2>/dev/null | grep -v '_templ\.go$' || true)
+          if [ -n "$unformatted" ]; then
+            echo "::error::gofmt found unformatted files:"
+            echo "$unformatted"
+            exit 1
+          fi
+
+  # vet: go vet runs static analysis the compiler doesn't. Independent
+  # of templ generation - vet doesn't need the generated files for the
+  # checks it cares about (struct tags, Printf format strings, etc.),
+  # but it DOES need the package to compile. We generate templ here too.
+  vet:
+    name: go vet
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with: { go-version: '1.25', cache: true }
+      - name: Install templ
+        run: go install github.com/a-h/templ/cmd/templ@v0.3.1001
+      - name: Generate templ
+        run: templ generate
+      - name: go vet
+        run: go vet ./...
+
+  # test: full race-detector test run. -race needs CGO_ENABLED=1
+  # (default on the Linux runner). The subprocess-shelling smoke tests
+  # in internal/tw skip cleanly when `task` isn't on PATH, so we don't
+  # install Taskwarrior - keeps CI fast and free of external state.
+  test:
+    name: go test -race
+    runs-on: ubuntu-latest
+    timeout-minutes: 8
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with: { go-version: '1.25', cache: true }
+      - name: Install templ
+        run: go install github.com/a-h/templ/cmd/templ@v0.3.1001
+      - name: Generate templ
+        run: templ generate
+      - name: go test -race
+        run: go test -race ./...
+
+  # scripts: bash -n on the install/uninstall scripts. They're
+  # user-facing and a syntax error would only surface when someone runs
+  # `make install` on a fresh box; this is cheap insurance.
+  scripts:
+    name: shell syntax
+    runs-on: ubuntu-latest
+    timeout-minutes: 1
+    steps:
+      - uses: actions/checkout@v4
+      - name: bash -n install.sh + uninstall.sh
+        run: |
+          bash -n scripts/install.sh
+          bash -n scripts/uninstall.sh
+
+  # build: final compile sanity. Catches any compile-only regression
+  # the test job might miss (e.g. an unused import in a non-test file
+  # that templ generation just resolved) and verifies the production
+  # build flags work, not just the default `go test`.
+  build:
+    name: go build
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with: { go-version: '1.25', cache: true }
+      - name: Install templ
+        run: go install github.com/a-h/templ/cmd/templ@v0.3.1001
+      - name: Generate templ
+        run: templ generate
+      - name: go build
+        run: go build ./...

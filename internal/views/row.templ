@@ -25,7 +25,7 @@ templ DoneRow(t tw.Task) {
 //   - edit → delete (completed tasks are read-only; the only useful
 //     destructive action is purging them entirely)
 templ rowFrame(t tw.Task, done bool) {
-	<li id={ "task-" + taskKey(t) } data-expanded="0" class={ "group " + CardClass() }>
+	<li id={ "task-" + taskKey(t) } data-expanded="0" class={ "group " + RowCardClass(!done && t.IsActive()) }>
 		<div class="flex items-center gap-3 p-3">
 			<input
 				type="checkbox"
@@ -33,7 +33,7 @@ templ rowFrame(t tw.Task, done bool) {
 				data-task-id={ taskKey(t) }
 				aria-label="Select for bulk action"
 			/>
-			if !done {
+			if !done && !t.IsRecurringParent() {
 				<button
 					type="button"
 					hx-post={ rowDoneURL(t) }
@@ -45,7 +45,9 @@ templ rowFrame(t tw.Task, done bool) {
 				></button>
 			}
 			<div class="min-w-0 flex-1">
-				<p class="truncate text-sm font-medium text-zinc-900 dark:text-zinc-100">{ t.Description }</p>
+				<p class="truncate text-sm font-medium text-zinc-900 dark:text-zinc-100">
+					@Linkify(t.Description)
+				</p>
 				<div class="mt-1 flex flex-wrap items-center gap-2">
 					@Project(t.Project)
 					for _, tag := range t.Tags {
@@ -57,6 +59,20 @@ templ rowFrame(t tw.Task, done bool) {
 					}
 					if len(t.Depends) > 0 {
 						<span class="inline-flex items-center rounded bg-zinc-100 px-2 py-0.5 text-xs text-zinc-700 dark:bg-zinc-800 dark:text-zinc-300" title="Blocked by other tasks">{ blockedBadgeLabel(len(t.Depends)) }</span>
+					}
+					if t.IsActive() {
+						<span class="inline-flex items-center gap-1 rounded bg-emerald-100 px-2 py-0.5 text-xs font-medium text-emerald-800 dark:bg-emerald-950/60 dark:text-emerald-200" title="Currently active (started)">
+							<span class="relative flex h-1.5 w-1.5">
+								<span class="absolute inline-flex h-full w-full animate-ping rounded-full bg-emerald-400 opacity-75" aria-hidden="true"></span>
+								<span class="relative inline-flex h-1.5 w-1.5 rounded-full bg-emerald-500" aria-hidden="true"></span>
+							</span>
+							active
+						</span>
+					}
+					if t.IsRecurringParent() {
+						<span class="inline-flex items-center rounded bg-amber-100 px-2 py-0.5 text-xs font-medium text-amber-800 dark:bg-amber-950/60 dark:text-amber-200" title={ "Recurring template - spawns instances every " + t.Recur }>↻ { t.Recur } template</span>
+					} else if t.IsRecurring() {
+						<span class="inline-flex items-center rounded bg-purple-100 px-2 py-0.5 text-xs font-medium text-purple-800 dark:bg-purple-950/60 dark:text-purple-200" title={ "Recurring instance - " + t.Recur }>↻ { t.Recur }</span>
 					}
 					for name, value := range t.UDAs {
 						if value != "" {
@@ -79,6 +95,31 @@ templ rowFrame(t tw.Task, done bool) {
 					title="Delete task"
 				>delete</button>
 			} else {
+				if !t.IsRecurringParent() {
+					if t.IsActive() {
+						<button
+							type="button"
+							hx-post={ taskStopURL(t) }
+							hx-swap="none"
+							class="row-action-stop inline-flex h-7 w-7 flex-none items-center justify-center rounded-full text-amber-600 hover:bg-amber-50 hover:text-amber-700 dark:text-amber-400 dark:hover:bg-amber-950/40 dark:hover:text-amber-300"
+							title="Stop tracking"
+							aria-label="Stop tracking this task"
+						>
+							<svg class="h-3 w-3" viewBox="0 0 20 20" fill="currentColor" aria-hidden="true"><rect x="4" y="4" width="12" height="12" rx="1"></rect></svg>
+						</button>
+					} else {
+						<button
+							type="button"
+							hx-post={ taskStartURL(t) }
+							hx-swap="none"
+							class="row-action-start inline-flex h-7 w-7 flex-none items-center justify-center rounded-full text-zinc-400 hover:bg-emerald-50 hover:text-emerald-600 dark:text-zinc-500 dark:hover:bg-emerald-950/40 dark:hover:text-emerald-400"
+							title="Start tracking"
+							aria-label="Start tracking this task"
+						>
+							<svg class="h-3 w-3" viewBox="0 0 20 20" fill="currentColor" aria-hidden="true"><polygon points="6 4 16 10 6 16"></polygon></svg>
+						</button>
+					}
+				}
 				<button
 					type="button"
 					hx-get={ rowEditURL(t) }
@@ -115,7 +156,9 @@ templ rowDetailGrid(t tw.Task) {
 			<span class="font-mono text-[11px] break-all select-all">{ t.UUID }</span>
 		}
 		@detailRow("Description", "wide") {
-			<span class="break-words">{ t.Description }</span>
+			<span class="break-words">
+				@Linkify(t.Description)
+			</span>
 		}
 		@detailRow("Urgency", "") {
 			{ fmt.Sprintf("%.2f", t.Urgency) }
@@ -169,6 +212,25 @@ templ rowDetailGrid(t tw.Task) {
 				{ humanDateTime(t.Scheduled) }
 			}
 		}
+		// Recurrence + active-since complete the time-related fields. Recur
+		// goes on the left (future-facing - "this will repeat"), Until on
+		// the right (provenance-ish - "stops at"), Active-since on the left
+		// (it's an in-flight time-from-now signal).
+		if t.Recur != "" {
+			@detailRow("Recur", "left") {
+				{ t.Recur }
+			}
+		}
+		if t.Until != "" {
+			@detailRow("Until", "right") {
+				{ humanDateTime(t.Until) }
+			}
+		}
+		if t.Start != "" {
+			@detailRow("Active since", "left") {
+				{ humanDateTime(t.Start) }
+			}
+		}
 		// Long fields (Tags, Notes, Blocked by, UDAs section) use the "long"
 		// kind which forces `sm:col-start-1` on the dt so they always begin a
 		// fresh row. Without it, when a long field lands in the second pair
@@ -194,7 +256,9 @@ templ rowDetailGrid(t tw.Task) {
 			@detailRow("Notes", "long") {
 				<div class="space-y-0.5">
 					for _, a := range t.Annotations {
-						<div>{ a.Description }</div>
+						<div>
+							@Linkify(a.Description)
+						</div>
 					}
 				</div>
 			}

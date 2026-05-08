@@ -65,8 +65,10 @@ dev:
 	wait
 
 # install/uninstall delegate to scripts so they're testable independently.
+# install.sh branches on `uname -s`: macOS gets a launchd LaunchAgent,
+# Linux (systemd-based distros only) gets a systemd --user unit.
 install: build
-	./scripts/install-launchd.sh
+	./scripts/install.sh
 
 uninstall:
-	./scripts/uninstall-launchd.sh
+	./scripts/uninstall.sh

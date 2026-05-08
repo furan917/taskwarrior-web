@@ -16,7 +16,9 @@ templ AnnotationsPanel(t tw.Task) {
 				for _, a := range t.Annotations {
 					<li class="flex items-start gap-2 text-sm">
 						<time class="mt-0.5 w-32 shrink-0 text-xs text-zinc-500 dark:text-zinc-400">{ humanDateTime(a.Entry) }</time>
-						<span class="flex-1 text-zinc-800 dark:text-zinc-200">{ a.Description }</span>
+						<span class="flex-1 text-zinc-800 dark:text-zinc-200">
+							@Linkify(a.Description)
+						</span>
 						<button
 							type="button"
 							hx-post={ taskDenotateURL(t) }

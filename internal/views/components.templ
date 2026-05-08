@@ -73,24 +73,29 @@ templ detailRow(label, kind string) {
 	switch kind {
 		case "left":
 			<dt class="font-medium text-zinc-700 sm:col-start-1 dark:text-zinc-300">{ label }</dt>
-			<dd>{ children... }
-</dd>
+			<dd>
+				{ children... }
+			</dd>
 		case "right":
 			<dt class="font-medium text-zinc-700 sm:col-start-3 dark:text-zinc-300">{ label }</dt>
-			<dd>{ children... }
-</dd>
+			<dd>
+				{ children... }
+			</dd>
 		case "long":
 			<dt class="font-medium text-zinc-700 sm:col-start-1 dark:text-zinc-300">{ label }</dt>
-			<dd class="sm:col-span-3">{ children... }
-</dd>
+			<dd class="sm:col-span-3">
+				{ children... }
+			</dd>
 		case "wide":
 			<dt class="font-medium text-zinc-700 dark:text-zinc-300">{ label }</dt>
-			<dd class="sm:col-span-3">{ children... }
-</dd>
+			<dd class="sm:col-span-3">
+				{ children... }
+			</dd>
 		default:
 			<dt class="font-medium text-zinc-700 dark:text-zinc-300">{ label }</dt>
-			<dd>{ children... }
-</dd>
+			<dd>
+				{ children... }
+			</dd>
 	}
 }
 

@@ -8,7 +8,7 @@ Local-only web UI for Taskwarrior 3.x. Single Go binary, served on `127.0.0.1:50
 - [templ](https://templ.guide/) for typed HTML.
 - [HTMX 2.x](https://htmx.org/) for in-place updates without an SPA.
 - [Tailwind v4](https://tailwindcss.com/) standalone CLI (no Node).
-- macOS launchd for auto-start at login.
+- macOS launchd / Linux systemd `--user` for auto-start at login.
 
 No Docker, no Node, no database server. Reads/writes go through the existing `task` CLI on the host, which serialises against `~/.task/taskchampion.sqlite3`.
 
@@ -28,13 +28,15 @@ make run                               # alias for the above
 open http://127.0.0.1:5050             # in browser
 ```
 
-## Install as a LaunchAgent (auto-start at login)
+## Install as a user service (auto-start at login)
 
 ```sh
 make install
 ```
 
-This:
+The script branches on `uname -s`:
+
+**macOS** (any version with launchd, i.e. all):
 
 1. Copies `bin/taskwarrior-web` to `~/.local/bin/`.
 2. Renders `deploy/local.taskwarrior-web.plist.tmpl` into `~/Library/LaunchAgents/`.
@@ -43,7 +45,22 @@ This:
 5. Enforces `chmod 700 ~/.task`.
 6. Curls `/healthz` to verify it's listening.
 
-It restarts on crash (KeepAlive on `Crashed=true`) but stays down when stopped cleanly via `launchctl bootout`.
+Restarts on crash (`KeepAlive` on `Crashed=true`); stays down when stopped cleanly via `launchctl bootout`.
+
+**Linux** (any systemd-based distro - Ubuntu, Debian, Arch, RHEL, Fedora, openSUSE, Manjaro, etc.):
+
+1. Copies `bin/taskwarrior-web` to `~/.local/bin/`.
+2. Renders `deploy/taskwarrior-web.service.tmpl` into `~/.config/systemd/user/`.
+3. Enables + starts it via `systemctl --user enable --now taskwarrior-web`.
+4. Creates `${XDG_STATE_HOME:-~/.local/state}/taskwarrior-web/`.
+5. Enforces `chmod 700 ~/.task`.
+6. Curls `/healthz` to verify it's listening.
+
+Restarts on crash (`Restart=on-failure`); stays down when stopped cleanly via `systemctl --user stop`. Service starts at login by default; for "running before any login", run `sudo loginctl enable-linger $USER` once.
+
+View logs with `journalctl --user -u taskwarrior-web -f` (last few lines from systemd's panic safety net) or tail `${XDG_STATE_HOME:-~/.local/state}/taskwarrior-web/app.log` (the rotated structured slog stream).
+
+Non-systemd Linux (Alpine, Void, Devuan, Slackware) is not supported by the install script - run `bin/taskwarrior-web &` and supervise it with whatever process manager you prefer.
 
 To also append a `tw` alias that opens `http://127.0.0.1:5050`, opt in via
 `INSTALL_ALIAS`:
@@ -77,7 +94,7 @@ regardless of which one the install used.
 make uninstall
 ```
 
-Stops the service, removes the plist, removes the binary from `~/.local/bin/`, and strips the `tw` alias from `~/.zshrc` if it's there. Logs in `~/Library/Logs/taskwarrior-web/` are preserved.
+Stops the service (launchd `bootout` on macOS, `systemctl --user disable --now` on Linux), removes the plist or systemd unit, removes the binary from `~/.local/bin/`, and strips the `tw` alias from any shell config it can find. Logs (`~/Library/Logs/taskwarrior-web/` on macOS, `${XDG_STATE_HOME:-~/.local/state}/taskwarrior-web/` on Linux) are preserved so you can review the historical record after removal.
 
 ## Develop
 

@@ -11,6 +11,7 @@ import (
 	"os"
 	"os/signal"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"syscall"
 
@@ -67,10 +68,38 @@ func checkDataDir(logger *slog.Logger) error {
 	return nil
 }
 
+// logDirFor is the testable core of log-dir resolution: takes an explicit
+// goos + home + xdg state-home string so a single test run can exercise
+// every branch (otherwise tests can only see whichever GOOS they happened
+// to run on). macOS uses ~/Library/Logs/<app> per Apple's filesystem
+// conventions; everything else (Linux, BSDs) uses the XDG state-home path
+// (~/.local/state/<app> by default), where systemd --user services
+// conventionally write persistent state.
+//
+// Kept in lock-step with scripts/install.sh: the install script's mkdir
+// + chmod 700 must hit the same directory the binary then opens, or the
+// install summary lies about where logs actually land.
+func logDirFor(goos, home, xdgStateHome string) string {
+	if goos == "darwin" {
+		return filepath.Join(home, "Library", "Logs", "taskwarrior-web")
+	}
+	if xdgStateHome != "" {
+		return filepath.Join(xdgStateHome, "taskwarrior-web")
+	}
+	return filepath.Join(home, ".local", "state", "taskwarrior-web")
+}
+
+// logDirForOS is the production wrapper that snapshots the live runtime.GOOS
+// and XDG_STATE_HOME env var. Kept as a thin shim so the binary's call
+// sites stay terse; logDirFor is the unit-tested function.
+func logDirForOS(home string) string {
+	return logDirFor(runtime.GOOS, home, os.Getenv("XDG_STATE_HOME"))
+}
+
 // newLogWriter returns an io.Writer that fans slog output to both stdout
-// (so `make run` shows logs in the foreground terminal AND launchd's
-// StandardOutPath catches anything in production) and a size-rotated
-// app.log file under ~/Library/Logs/taskwarrior-web. Rotation policy:
+// (so `make run` shows logs in the foreground terminal AND the supervisor's
+// captured stream catches anything in production) and a size-rotated
+// app.log file under the OS-appropriate state directory. Rotation policy:
 // 10 MB per file, 3 backups, 30 day max age, gzip-compressed.
 //
 // If the home dir or log dir can't be resolved/created we fall back to
@@ -80,7 +109,7 @@ func newLogWriter() (io.Writer, error) {
 	if err != nil {
 		return os.Stdout, fmt.Errorf("home dir: %w", err)
 	}
-	dir := filepath.Join(home, "Library", "Logs", "taskwarrior-web")
+	dir := logDirForOS(home)
 	if err := os.MkdirAll(dir, 0o700); err != nil {
 		return os.Stdout, fmt.Errorf("mkdir %s: %w", dir, err)
 	}

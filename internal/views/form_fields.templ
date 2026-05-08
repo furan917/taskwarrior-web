@@ -33,8 +33,57 @@ templ dateHelpTip() {
 				<dt class="font-medium text-zinc-800 dark:text-zinc-100">Relative offsets</dt>
 				<dd class="font-mono text-[11px] text-zinc-600 dark:text-zinc-300">+2d, +1w, -3h<br/>due-3d (relative to due)<br/>scheduled+1w</dd>
 			</dl>
+			<p class="mt-2 text-[11px] text-zinc-500 dark:text-zinc-400">Or click a preset below the field.</p>
 		</div>
 	</details>
+}
+
+// recurHelpTip is the per-field "?" disclosure for the Recur input. Lists
+// the duration forms Taskwarrior accepts. Mirrors dateHelpTip's structure
+// so the two help popovers feel uniform.
+templ recurHelpTip() {
+	<details class="relative inline-block leading-none">
+		<summary
+			class="list-none cursor-help text-zinc-400 hover:text-zinc-700 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:rounded-full dark:text-zinc-500 dark:hover:text-zinc-200 [&::-webkit-details-marker]:hidden"
+			aria-label="Recurrence format help"
+			title="Click for recurrence format help"
+		>
+			<span class="inline-flex h-4 w-4 items-center justify-center rounded-full border border-current text-[10px] font-semibold">?</span>
+		</summary>
+		<div class="absolute left-0 top-full z-30 mt-1 w-64 rounded-md border border-zinc-200 bg-white p-3 text-xs leading-relaxed text-zinc-700 shadow-lg dark:border-zinc-700 dark:bg-zinc-900 dark:text-zinc-200">
+			<p class="mb-1 font-semibold text-zinc-900 dark:text-zinc-100">Recurrence formats</p>
+			<dl class="space-y-1.5">
+				<dt class="font-medium text-zinc-800 dark:text-zinc-100">Keywords</dt>
+				<dd class="font-mono text-[11px] text-zinc-600 dark:text-zinc-300">daily, weekly, monthly<br/>biweekly, fortnight<br/>quarterly, annually</dd>
+				<dt class="font-medium text-zinc-800 dark:text-zinc-100">Duration</dt>
+				<dd class="font-mono text-[11px] text-zinc-600 dark:text-zinc-300">1d, 2w, 1mo, 3y</dd>
+				<dt class="font-medium text-zinc-800 dark:text-zinc-100">ISO 8601</dt>
+				<dd class="font-mono text-[11px] text-zinc-600 dark:text-zinc-300">P7D, P1M, PT1H</dd>
+			</dl>
+			<p class="mt-2 text-zinc-500 dark:text-zinc-400">Pair with Until to stop spawning instances after a date.</p>
+		</div>
+	</details>
+}
+
+// datePresets renders a row of pill buttons under a date input. Clicking a
+// pill fills the sibling input[name=target] and dispatches a bubbling input
+// event so form_validation.js clears any red border on that field.
+//
+// Pure declarative markup: behaviour lives in date_presets.js, which delegates
+// off [data-date-preset] at the document level. Strings here are passed
+// straight to Taskwarrior, so they must be valid date tokens (see dateHelpTip
+// for the accepted forms).
+templ datePresets(target string, presets []string) {
+	<div class="mt-1 flex flex-wrap gap-1">
+		for _, p := range presets {
+			<button
+				type="button"
+				data-date-preset
+				data-target={ target }
+				class="rounded border border-zinc-200 bg-zinc-50 px-1.5 py-0.5 font-mono text-[11px] text-zinc-600 hover:bg-zinc-100 hover:text-zinc-900 focus:outline-none focus:ring-2 focus:ring-blue-500 dark:border-zinc-700 dark:bg-zinc-800 dark:text-zinc-300 dark:hover:bg-zinc-700 dark:hover:text-zinc-100"
+			>{ p }</button>
+		}
+	</div>
 }
 
 // taskForm holds the field values shared between add and edit modals.
@@ -53,8 +102,19 @@ type taskForm struct {
 	Due         string
 	Wait        string
 	Scheduled   string
-	UDAs        map[string]string
-	Depends     []string
+	// Recur is a Taskwarrior duration expression ("weekly", "monthly",
+	// "1mo", "P7D"). Empty means a one-off task. Until pairs with it as
+	// the stop date for the recurring template.
+	Recur string
+	Until string
+	// RecurrenceReadOnly disables the Recur and Until inputs. Set when
+	// the modal is editing a recurring CHILD instance: TW accepts the
+	// modify but the change is orphaned (siblings keep the parent's
+	// schedule), so we render the fields read-only with a hint pointing
+	// to the parent template instead.
+	RecurrenceReadOnly bool
+	UDAs               map[string]string
+	Depends            []string
 }
 
 templ formFields(f taskForm, udas []tw.UDA, projects, tags []string, allOpenTasks []tw.Task) {
@@ -85,6 +145,7 @@ templ formFields(f taskForm, udas []tw.UDA, projects, tags []string, allOpenTask
 					@dateHelpTip()
 				</div>
 				<input type="text" name="due" value={ f.Due } placeholder="+2d / tomorrow / 2026-05-09" class="w-full rounded border border-zinc-300 px-2 py-1.5 text-sm focus:border-blue-500 focus:outline-none dark:border-zinc-600 dark:bg-zinc-800 dark:text-zinc-100 dark:placeholder-zinc-500"/>
+				@datePresets("due", []string{"today", "tomorrow", "+3d", "+1w", "+2w", "eom"})
 			</label>
 			<label class="block text-sm">
 				<div class="mb-1 flex items-center gap-1.5 text-zinc-700 dark:text-zinc-300">
@@ -92,6 +153,7 @@ templ formFields(f taskForm, udas []tw.UDA, projects, tags []string, allOpenTask
 					@dateHelpTip()
 				</div>
 				<input type="text" name="wait" value={ f.Wait } placeholder="+1d / due-7d" class="w-full rounded border border-zinc-300 px-2 py-1.5 text-sm focus:border-blue-500 focus:outline-none dark:border-zinc-600 dark:bg-zinc-800 dark:text-zinc-100 dark:placeholder-zinc-500"/>
+				@datePresets("wait", []string{"tomorrow", "+1w", "due-7d", "due-3d"})
 			</label>
 			<label class="col-span-2 block text-sm">
 				<div class="mb-1 flex items-center gap-1.5 text-zinc-700 dark:text-zinc-300">
@@ -99,7 +161,35 @@ templ formFields(f taskForm, udas []tw.UDA, projects, tags []string, allOpenTask
 					@dateHelpTip()
 				</div>
 				<input type="text" name="scheduled" value={ f.Scheduled } placeholder="+3d / due-3d / 2026-05-15" class="w-full rounded border border-zinc-300 px-2 py-1.5 text-sm focus:border-blue-500 focus:outline-none dark:border-zinc-600 dark:bg-zinc-800 dark:text-zinc-100 dark:placeholder-zinc-500"/>
+				@datePresets("scheduled", []string{"today", "tomorrow", "+3d", "due-3d", "due-1d"})
 			</label>
+			<label class="block text-sm">
+				<div class="mb-1 flex items-center gap-1.5 text-zinc-700 dark:text-zinc-300">
+					<span>Recur</span>
+					@recurHelpTip()
+				</div>
+				if f.RecurrenceReadOnly {
+					<input type="text" name="recur" value={ f.Recur } readonly tabindex="-1" class="w-full cursor-not-allowed rounded border border-zinc-200 bg-zinc-50 px-2 py-1.5 text-sm text-zinc-500 dark:border-zinc-700 dark:bg-zinc-800/60 dark:text-zinc-400"/>
+				} else {
+					<input type="text" name="recur" value={ f.Recur } placeholder="weekly / 1mo / blank for one-off" class="w-full rounded border border-zinc-300 px-2 py-1.5 text-sm focus:border-blue-500 focus:outline-none dark:border-zinc-600 dark:bg-zinc-800 dark:text-zinc-100 dark:placeholder-zinc-500"/>
+					@datePresets("recur", []string{"weekly", "biweekly", "monthly", "quarterly", "annually"})
+				}
+			</label>
+			<label class="block text-sm">
+				<div class="mb-1 flex items-center gap-1.5 text-zinc-700 dark:text-zinc-300">
+					<span>Until</span>
+					@dateHelpTip()
+				</div>
+				if f.RecurrenceReadOnly {
+					<input type="text" name="until" value={ f.Until } readonly tabindex="-1" class="w-full cursor-not-allowed rounded border border-zinc-200 bg-zinc-50 px-2 py-1.5 text-sm text-zinc-500 dark:border-zinc-700 dark:bg-zinc-800/60 dark:text-zinc-400"/>
+				} else {
+					<input type="text" name="until" value={ f.Until } placeholder="2027-01-01 / eoy" class="w-full rounded border border-zinc-300 px-2 py-1.5 text-sm focus:border-blue-500 focus:outline-none dark:border-zinc-600 dark:bg-zinc-800 dark:text-zinc-100 dark:placeholder-zinc-500"/>
+					@datePresets("until", []string{"+3mo", "+6mo", "+1y", "eoy"})
+				}
+			</label>
+			if f.RecurrenceReadOnly {
+				<p class="col-span-2 -mt-2 text-xs text-zinc-500 dark:text-zinc-400">Recurrence belongs to the parent template - edit there to change schedule. Find it under More <span class="text-zinc-400">▾</span> Built-in <span class="text-zinc-400">▾</span> Recurring.</p>
+			}
 		</div>
 		if len(udas) > 0 {
 			<div class="grid grid-cols-2 gap-3">
