@@ -192,11 +192,7 @@ func (v *Views) renderReport(w http.ResponseWriter, r *http.Request, name string
 	tasks, err := v.fetch(r, spec.filter)
 	if err != nil {
 		v.Logger.Error("report fetch failed", "report", name, "err", err)
-		msg := "task export failed"
-		if tw.IsNotInitialised(err) {
-			msg = "Taskwarrior is not initialised — run `task` once in a terminal to create ~/.taskrc, then reload"
-		}
-		http.Error(w, msg, http.StatusInternalServerError)
+		http.Error(w, exportErrMsg(err), http.StatusInternalServerError)
 		return
 	}
 	page := v.buildPage(r, spec.title, spec.active, true)
@@ -259,7 +255,7 @@ func (v *Views) Tag(w http.ResponseWriter, r *http.Request) {
 	tasks, err := v.fetch(r, "(status:pending or status:waiting) +"+name)
 	if err != nil {
 		v.Logger.Error("tag fetch failed", "tag", name, "err", err)
-		http.Error(w, "task export failed", http.StatusInternalServerError)
+		http.Error(w, exportErrMsg(err), http.StatusInternalServerError)
 		return
 	}
 	page := v.buildPage(r, "+"+name, "", true)
@@ -278,7 +274,7 @@ func (v *Views) Project(w http.ResponseWriter, r *http.Request) {
 	tasks, err := v.fetch(r, "(status:pending or status:waiting) project:"+name)
 	if err != nil {
 		v.Logger.Error("project fetch failed", "project", name, "err", err)
-		http.Error(w, "task export failed", http.StatusInternalServerError)
+		http.Error(w, exportErrMsg(err), http.StatusInternalServerError)
 		return
 	}
 	page := v.buildPage(r, "project: "+name, "", true)
@@ -364,6 +360,20 @@ func (v *Views) fetch(r *http.Request, filter string) ([]tw.Task, error) {
 	}
 	applySort(tasks, views.ParseSort(r.URL.Query()))
 	return tasks, nil
+}
+
+// exportErrMsg maps a task export error to a user-facing message. Keeps all
+// the error-classification logic in one place instead of duplicated across
+// every fetch handler.
+func exportErrMsg(err error) string {
+	switch {
+	case tw.IsNotInitialised(err):
+		return "Taskwarrior is not initialised — run `task` once in a terminal to create ~/.taskrc, then reload"
+	case tw.IsInvalidFilter(err):
+		return "A context filter could not be evaluated — run `task context none` to clear it, or redefine the context with export-compatible syntax (use -tag not -+tag)"
+	default:
+		return "task export failed"
+	}
 }
 
 // buildPage assembles the views.Page envelope shared by every read handler.
@@ -483,7 +493,7 @@ func (v *Views) Done(w http.ResponseWriter, r *http.Request) {
 	tasks, err := v.exportWithContext(r, "status:completed", fmt.Sprintf("end.after:now-%dd", days))
 	if err != nil {
 		v.Logger.Error("done fetch failed", "err", err)
-		http.Error(w, "task export failed", http.StatusInternalServerError)
+		http.Error(w, exportErrMsg(err), http.StatusInternalServerError)
 		return
 	}
 	sort.SliceStable(tasks, func(i, j int) bool {

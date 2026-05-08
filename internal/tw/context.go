@@ -45,13 +45,29 @@ func FilterContainsRcOverride(filter string) bool {
 	return false
 }
 
+// exportIncompatibleToken matches the `-+word` pattern: a tag negation using
+// the "has tag" operator. `task list` / `task next` accept this form, but
+// `task export` does not — it returns exit 2 with "The expression could not
+// be evaluated." The correct form for export is `-word` (no `+`).
+var exportIncompatibleToken = regexp.MustCompile(`(?:^|\s)-\+\w`)
+
+// FilterContainsExportIncompatible reports whether a filter uses syntax that
+// `task export` cannot parse. Specifically, `-+tag` negation tokens that work
+// in report commands but are rejected by the export expression evaluator.
+func FilterContainsExportIncompatible(filter string) bool {
+	return exportIncompatibleToken.MatchString(filter)
+}
+
 // SafeReadFilter returns the context's read filter only when it carries no
-// rc.* override tokens; otherwise empty. Callers that compose this into
-// argv (handlers/views.exportWithContext) treat empty as "no context
-// clause", which is the correct degraded behaviour - the user keeps a
-// working app even if one of their contexts has been tampered with.
+// rc.* override tokens and no export-incompatible syntax; otherwise empty.
+// Callers that compose this into argv (handlers/views.exportWithContext) treat
+// empty as "no context clause" — the user keeps a working app even if a
+// context filter is malformed or uses report-only syntax.
 func (c Context) SafeReadFilter() string {
 	if FilterContainsRcOverride(c.ReadFilter) {
+		return ""
+	}
+	if FilterContainsExportIncompatible(c.ReadFilter) {
 		return ""
 	}
 	return c.ReadFilter

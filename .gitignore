@@ -34,3 +34,17 @@ coverage.txt
 
 # OS
 .DS_Store
+Thumbs.db
+
+# Node (Playwright / tooling)
+node_modules/
+package-lock.json
+package.json
+
+# Playwright scripts and artefacts
+walkthrough.mjs
+/playwright-report/
+/test-results/
+
+# Demo video (generated, not source)
+/docs/demo.mp4

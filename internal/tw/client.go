@@ -512,6 +512,18 @@ func (e *TaskExitError) Error() string {
 
 func (e *TaskExitError) Unwrap() error { return e.Wrapped }
 
+// IsInvalidFilter reports whether err is a TaskExitError caused by a filter
+// expression that Taskwarrior's export evaluator cannot parse. This is a
+// safety net for filter shapes (e.g. -+tag) that SafeReadFilter did not
+// catch at composition time.
+func IsInvalidFilter(err error) bool {
+	var te *TaskExitError
+	if !errors.As(err, &te) {
+		return false
+	}
+	return strings.Contains(te.Stderr, "The expression could not be evaluated")
+}
+
 // Project / tag discovery (auto-suggest sources). Cached for the process
 // lifetime; restart to pick up newly-defined names.
 //
