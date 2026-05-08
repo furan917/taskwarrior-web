@@ -1,5 +1,12 @@
 # Changelog
 
+## [1.0.1](https://github.com/furan917/taskwarrior-web/compare/v1.0.0...v1.0.1) (2026-05-08)
+
+
+### Bug Fixes
+
+* add fallover path for incompatible filters ([13e3644](https://github.com/furan917/taskwarrior-web/commit/13e3644d4aa47eefa69481929985e63b406b0c33))
+
 ## 1.0.0 (2026-05-08)
 
 
