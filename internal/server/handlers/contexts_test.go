@@ -201,8 +201,9 @@ func TestViews_Report_ThreadsActiveContext(t *testing.T) {
 	if !strings.Contains(body, `aria-label="Context: work"`) {
 		t.Errorf("active pill markup missing: body=%s", body)
 	}
-	// Dropdown lists both entries.
-	if !strings.Contains(body, `data-context-item>home `) {
+	// Dropdown lists both entries. Selector tracks the generic popover
+	// attribute (was data-context-item before the popover refactor).
+	if !strings.Contains(body, `data-popover-item>home `) {
 		t.Errorf("home not listed in dropdown; body=%s", body)
 	}
 	// Title carries the context hint.

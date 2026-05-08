@@ -171,6 +171,75 @@ func TestTasks_Delete_Success(t *testing.T) {
 	}
 }
 
+// TestTasks_Start/Stop/Duplicate_Success exercise the idAction helper
+// through each of the three new endpoints. The fake binary returns
+// success for any argv; we just want to confirm the handler returns
+// 204 + HX-Trigger refresh and rejects bad ids.
+func TestTasks_Start_Success(t *testing.T) {
+	installFakeTask(t, "[]")
+	tk := newTasks()
+	req := httptest.NewRequest(http.MethodPost, "/tasks/42/start", nil)
+	req.SetPathValue("id", "42")
+	rr := httptest.NewRecorder()
+	tk.Start(rr, req)
+	if rr.Code != http.StatusNoContent {
+		t.Errorf("got %d want 204", rr.Code)
+	}
+	if rr.Header().Get("HX-Trigger") != "refresh" {
+		t.Errorf("HX-Trigger missing")
+	}
+}
+
+func TestTasks_Start_RejectsBadID(t *testing.T) {
+	tk := newTasks()
+	req := httptest.NewRequest(http.MethodPost, "/tasks/x/start", nil)
+	req.SetPathValue("id", "abc")
+	rr := httptest.NewRecorder()
+	tk.Start(rr, req)
+	if rr.Code != http.StatusBadRequest {
+		t.Errorf("got %d want 400", rr.Code)
+	}
+}
+
+func TestTasks_Stop_Success(t *testing.T) {
+	installFakeTask(t, "[]")
+	tk := newTasks()
+	req := httptest.NewRequest(http.MethodPost, "/tasks/42/stop", nil)
+	req.SetPathValue("id", "42")
+	rr := httptest.NewRecorder()
+	tk.Stop(rr, req)
+	if rr.Code != http.StatusNoContent {
+		t.Errorf("got %d want 204", rr.Code)
+	}
+}
+
+func TestTasks_Duplicate_Success(t *testing.T) {
+	installFakeTask(t, "[]")
+	tk := newTasks()
+	req := httptest.NewRequest(http.MethodPost, "/tasks/42/duplicate", nil)
+	req.SetPathValue("id", "42")
+	rr := httptest.NewRecorder()
+	tk.Duplicate(rr, req)
+	if rr.Code != http.StatusNoContent {
+		t.Errorf("got %d want 204", rr.Code)
+	}
+}
+
+// TestTasks_Start_500WhenTaskBinaryFails defends the idAction error path:
+// when the underlying tw.Client call returns an error, the handler must
+// surface 500 (not silently 204-refresh) so the user sees the failure.
+func TestTasks_Start_500WhenTaskBinaryFails(t *testing.T) {
+	installFailingTask(t)
+	tk := newTasks()
+	req := httptest.NewRequest(http.MethodPost, "/tasks/42/start", nil)
+	req.SetPathValue("id", "42")
+	rr := httptest.NewRecorder()
+	tk.Start(rr, req)
+	if rr.Code != http.StatusInternalServerError {
+		t.Errorf("got %d want 500", rr.Code)
+	}
+}
+
 func TestTasks_Delete_RejectsBadID(t *testing.T) {
 	tk := newTasks()
 	req := httptest.NewRequest(http.MethodDelete, "/tasks/x", nil)
@@ -179,6 +248,157 @@ func TestTasks_Delete_RejectsBadID(t *testing.T) {
 	tk.Delete(rr, req)
 	if rr.Code != http.StatusBadRequest {
 		t.Errorf("got %d want 400", rr.Code)
+	}
+}
+
+// fixed UUID used by the cascade fixtures so the recorded argv can be
+// asserted exactly. Any well-formed UUID would do; this one is in the
+// shape Taskwarrior emits.
+const cascadeParentUUID = "11111111-2222-3333-4444-555555555555"
+
+// installCascadeFake builds a fake `task` script that returns the given
+// JSON for `export` calls AND records every invocation's argv. Reuses
+// the unified fakeTaskOpts so the script handles all the discovery
+// branches (active context, contexts, projects, tags, UDAs) before
+// falling through to the recording path.
+func installCascadeFake(t *testing.T, exportJSON string) string {
+	t.Helper()
+	return installFakeTaskWith(t, fakeTaskOpts{
+		ExportJSON: exportJSON,
+		RecordArgv: true,
+	})
+}
+
+// readAllArgs returns the argv of every recorded invocation, oldest first.
+// readArgs (forms_test.go) returns just the latest; cascade tests need to
+// see both the parent's pre-cascade Export and the post-cascade delete in
+// order to assert ordering.
+func readAllArgs(t *testing.T, logDir string) [][]string {
+	t.Helper()
+	entries, err := os.ReadDir(logDir)
+	if err != nil {
+		t.Fatalf("readdir: %v", err)
+	}
+	out := make([][]string, 0, len(entries))
+	for _, e := range entries {
+		data, err := os.ReadFile(filepath.Join(logDir, e.Name()))
+		if err != nil {
+			t.Fatalf("read args: %v", err)
+		}
+		var lines []string
+		for _, l := range strings.Split(string(data), "\n") {
+			if l == "" {
+				continue
+			}
+			lines = append(lines, l)
+		}
+		out = append(out, lines)
+	}
+	return out
+}
+
+// TestTasks_Delete_CascadesOnRecurringParent: clicking Delete on a
+// recurring parent template runs THREE TW invocations: (1) export to
+// classify the task, (2) cascade `parent:<uuid> status:pending delete`
+// to clean up children, (3) the parent's own `delete`. The recorded
+// argv tells us each ran with the right filter shape.
+func TestTasks_Delete_CascadesOnRecurringParent(t *testing.T) {
+	logDir := installCascadeFake(t, `[{
+		"id": 9,
+		"uuid": "`+cascadeParentUUID+`",
+		"description": "parent",
+		"status": "recurring",
+		"recur": "weekly",
+		"entry": "20260507T120000Z"
+	}]`)
+	tk := newTasks()
+	req := httptest.NewRequest(http.MethodDelete, "/tasks/"+cascadeParentUUID, nil)
+	req.SetPathValue("id", cascadeParentUUID)
+	rr := httptest.NewRecorder()
+	tk.Delete(rr, req)
+
+	if rr.Code != http.StatusNoContent {
+		t.Fatalf("got %d want 204; body=%q", rr.Code, rr.Body.String())
+	}
+	calls := readAllArgs(t, logDir)
+	// Expect at least: export(parent), cascade-delete(children), parent-
+	// delete. The exact count depends on which discovery prefetches fire
+	// during this codepath, so we look for the cascade signature instead
+	// of counting.
+	var sawCascade, sawParentDelete bool
+	for _, argv := range calls {
+		joined := strings.Join(argv, " ")
+		if strings.Contains(joined, "parent:"+cascadeParentUUID) && strings.Contains(joined, "status:pending") && strings.Contains(joined, "delete") {
+			sawCascade = true
+		}
+		// Parent delete is `<uuid> delete` WITHOUT a `parent:` clause.
+		if !strings.Contains(joined, "parent:") && strings.Contains(joined, cascadeParentUUID) && strings.Contains(joined, "delete") {
+			sawParentDelete = true
+		}
+	}
+	if !sawCascade {
+		t.Errorf("cascade invocation not found; recorded calls: %v", calls)
+	}
+	if !sawParentDelete {
+		t.Errorf("parent delete invocation not found; recorded calls: %v", calls)
+	}
+}
+
+// TestTasks_Delete_NoCascadeOnNonParent: clicking Delete on a regular
+// (non-recurring) task should NOT issue a parent:<uuid> filter delete.
+// Defends against the cascade branch firing when it shouldn't.
+func TestTasks_Delete_NoCascadeOnNonParent(t *testing.T) {
+	logDir := installCascadeFake(t, `[{
+		"id": 1,
+		"uuid": "`+cascadeParentUUID+`",
+		"description": "regular",
+		"status": "pending",
+		"entry": "20260507T120000Z"
+	}]`)
+	tk := newTasks()
+	req := httptest.NewRequest(http.MethodDelete, "/tasks/"+cascadeParentUUID, nil)
+	req.SetPathValue("id", cascadeParentUUID)
+	rr := httptest.NewRecorder()
+	tk.Delete(rr, req)
+
+	if rr.Code != http.StatusNoContent {
+		t.Fatalf("got %d want 204", rr.Code)
+	}
+	for _, argv := range readAllArgs(t, logDir) {
+		if strings.Contains(strings.Join(argv, " "), "parent:") {
+			t.Errorf("non-parent delete unexpectedly ran a parent: cascade; argv=%v", argv)
+		}
+	}
+}
+
+// TestTasks_Delete_NoCascadeOnRecurringChild: a child instance carries
+// `Recur` (inherited from parent) but has Status:pending - cascade must
+// NOT fire (only IsRecurringParent triggers it). Otherwise deleting one
+// instance would wipe siblings, which is the opposite of the desired
+// "Delete this instance, the series continues" UX.
+func TestTasks_Delete_NoCascadeOnRecurringChild(t *testing.T) {
+	logDir := installCascadeFake(t, `[{
+		"id": 10,
+		"uuid": "`+cascadeParentUUID+`",
+		"description": "child",
+		"status": "pending",
+		"recur": "weekly",
+		"parent": "22222222-3333-4444-5555-666666666666",
+		"entry": "20260507T120000Z"
+	}]`)
+	tk := newTasks()
+	req := httptest.NewRequest(http.MethodDelete, "/tasks/"+cascadeParentUUID, nil)
+	req.SetPathValue("id", cascadeParentUUID)
+	rr := httptest.NewRecorder()
+	tk.Delete(rr, req)
+
+	if rr.Code != http.StatusNoContent {
+		t.Fatalf("got %d want 204", rr.Code)
+	}
+	for _, argv := range readAllArgs(t, logDir) {
+		if strings.Contains(strings.Join(argv, " "), "parent:") {
+			t.Errorf("child-instance delete unexpectedly ran a parent: cascade; argv=%v", argv)
+		}
 	}
 }
 

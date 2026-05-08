@@ -3,11 +3,20 @@ package views
 // Page is the data envelope every full-page view passes to Layout.
 type Page struct {
 	Title         string
-	ActiveView    string // matches one of the nav items: next, ready, agenda, forecast, project
+	ActiveView    string // matches one of the nav items: next, ready, agenda, forecast, project, r-<name>
 	CSRFToken     string
 	HasTaskList   bool   // true on pages that render the #task-list container; flips on the row-focus keybindings in the footer
 	ActiveContext string // bare context name (e.g. "work"); empty when no context is active. Drives the nav pill, title hint, empty-state copy and modal subtitle.
 	Contexts      []NamedContext
+	// BuiltinReports and CustomReports both flow into the nav's "More"
+	// dropdown but render under separate section headers ("Built-in" vs
+	// "Custom") so the user can scan them independently. BuiltinReports
+	// is the curated subset of Taskwarrior's stock reports we surface
+	// (blocked, overdue, waiting, etc.); CustomReports is whatever the
+	// user has defined in ~/.taskrc beyond the curated five top-level
+	// tabs (ready/next/agenda/forecast/done) and the built-ins.
+	BuiltinReports []string
+	CustomReports  []string
 }
 
 // NamedContext is the per-render shape of one defined context for the nav
@@ -55,6 +64,7 @@ templ Layout(p Page) {
 			<script src="/static/js/autocomplete.js" defer></script>
 			<script src="/static/js/deps.js" defer></script>
 			<script src="/static/js/form_validation.js" defer></script>
+			<script src="/static/js/date_presets.js" defer></script>
 		</head>
 		<body class="bg-zinc-50 text-zinc-900 antialiased min-h-screen dark:bg-zinc-950 dark:text-zinc-100">
 			<main class="container mx-auto max-w-5xl p-6">
@@ -64,7 +74,7 @@ templ Layout(p Page) {
 						@themeToggle()
 					</div>
 				</header>
-				@Nav(p.ActiveView, p.ActiveContext, p.Contexts)
+				@Nav(p.ActiveView, p.ActiveContext, p.Contexts, p.BuiltinReports, p.CustomReports)
 				if p.ActiveContext != "" {
 					<div class={ NavRuleClass(ColourForContext(p.ActiveContext)) } aria-hidden="true"></div>
 				}

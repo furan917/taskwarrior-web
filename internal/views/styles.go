@@ -28,6 +28,18 @@ func EmptyCardClass() string {
 	return "rounded border border-dashed border-zinc-300 bg-white dark:border-zinc-800 dark:bg-zinc-900"
 }
 
+// RowCardClass is CardClass plus an at-a-glance active-task highlight when
+// active=true: emerald left stripe + faint emerald tint. The two states are
+// each emitted as fully literal class strings (no concatenation of utility
+// fragments) so Tailwind's JIT scanner can see every class - composing
+// utilities by string concat would defeat the scanner.
+func RowCardClass(active bool) string {
+	if active {
+		return "rounded border border-zinc-200 border-l-4 border-l-emerald-500 bg-emerald-50/40 shadow-sm dark:border-zinc-800 dark:border-l-emerald-500 dark:bg-emerald-950/20"
+	}
+	return CardClass()
+}
+
 // PollIntervalSeconds is how often the task-list polls for updates. The HTMX
 // trigger is gated by shouldRefresh() in app.js so polling pauses while the
 // user is editing.
@@ -45,4 +57,4 @@ const SearchInputWidth = "w-48"
 
 // ModalMaxWidth is the Tailwind max-width class shared by every modal
 // dialog. Centralising means one place to widen all modals at once.
-const ModalMaxWidth = "max-w-lg"
+const ModalMaxWidth = "max-w-xl"

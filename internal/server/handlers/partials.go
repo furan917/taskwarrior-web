@@ -29,7 +29,19 @@ func (v *Views) Partial(w http.ResponseWriter, r *http.Request) {
 		}
 		filter = "project:" + project
 	case report != "":
+		// Reports come in two flavours: the curated four (next/ready/agenda/
+		// forecast) handled by specForReport, and the dynamic set (built-in
+		// shortlist + user-defined taskrc reports) routed through
+		// dynamicReportSpec. The polling endpoint must accept both or the
+		// /r/{name} pages 400 every 30s.
+		if !tw.ReportNamePattern.MatchString(report) {
+			http.Error(w, "invalid report name", http.StatusBadRequest)
+			return
+		}
 		spec, ok := v.specForReport(report)
+		if !ok {
+			spec, ok = v.dynamicReportSpec(r.Context(), report)
+		}
 		if !ok {
 			http.Error(w, "unknown report", http.StatusBadRequest)
 			return

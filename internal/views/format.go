@@ -23,6 +23,22 @@ func udaDisplayLabel(name string) string {
 	return strings.ToUpper(name[:1]) + strings.ReplaceAll(name[1:], "_", " ")
 }
 
+// reportDisplayLabel title-cases a Taskwarrior report name for nav display
+// ("recurring" -> "Recurring", "burndown.daily" -> "Burndown.daily"). TW
+// emits report names lowercase by convention, but the nav reads as a
+// proper noun list ("Recurring", "Blocked", ...) so the bare lowercase
+// looks broken alongside the curated tabs (Ready / Next / Agenda).
+//
+// ASCII-only by design: tw.ReportNamePattern is `^[a-zA-Z0-9_-]+$`, so
+// name[:1] always slices a single rune. A multi-byte first char would
+// produce invalid UTF-8 here; the regex guard upstream prevents it.
+func reportDisplayLabel(name string) string {
+	if name == "" {
+		return ""
+	}
+	return strings.ToUpper(name[:1]) + name[1:]
+}
+
 // sortedUDANames returns the UDA map's keys (those with a non-empty value)
 // in stable alphabetical order so re-renders of the same task keep field
 // order consistent. Map iteration order in Go is randomised per range and

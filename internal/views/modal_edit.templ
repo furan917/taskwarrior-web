@@ -10,7 +10,14 @@ templ ModalEdit(csrf string, t tw.Task, udas []tw.UDA, projects, tags []string, 
 	@modalShell() {
 		<form hx-put={ taskURL(t) } hx-target-error="#task-form-errors" hx-swap="innerHTML" class="flex flex-col">
 			<input type="hidden" name="_csrf" value={ csrf }/>
-			@modalHeader("Edit task")
+			@modalHeader(modalEditTitle(t))
+			if t.IsRecurringParent() {
+				@modalEditBanner("amber", "Recurring template - changes here apply to future instances. Past instances are unaffected.")
+			} else if t.Status == "deleted" {
+				@modalEditBanner("zinc", "This task is deleted. Editing here will not restore it.")
+			} else if t.Status == "completed" {
+				@modalEditBanner("zinc", "This task is completed. Editing here will not change its history.")
+			}
 			@formFields(taskForm{
 				Description: t.Description,
 				Project:     t.Project,
@@ -18,33 +25,197 @@ templ ModalEdit(csrf string, t tw.Task, udas []tw.UDA, projects, tags []string, 
 				Due:         humanDate(t.Due),
 				Wait:        humanDate(t.Wait),
 				Scheduled:   humanDate(t.Scheduled),
+				Recur:       t.Recur,
+				Until:       humanDate(t.Until),
 				UDAs:        udaFormValues(t, udas),
 				Depends:     t.Depends,
+				// Recurrence fields are only meaningful on the parent template:
+				// edits to a child's Recur/Until are accepted by TW but never
+				// propagate to siblings, so we render them read-only with a
+				// hint pointing to the parent.
+				RecurrenceReadOnly: t.IsRecurring() && !t.IsRecurringParent(),
 			}, udas, projects, tags, allOpenTasks)
 			@AnnotationsPanel(t)
 			<div id="task-form-errors" class="empty:hidden border-t border-zinc-200 px-4 py-3 dark:border-zinc-700"></div>
 			<div class="flex items-center justify-between gap-2 border-t border-zinc-200 px-4 py-3 dark:border-zinc-700">
-				<button
-					type="button"
-					hx-delete={ taskURL(t) }
-					hx-swap="none"
-					hx-confirm="Delete this task?"
-					data-close-on-success
-					class="rounded bg-red-600 px-3 py-1.5 text-sm font-medium text-white hover:bg-red-700 focus:outline-none focus:ring-2 focus:ring-red-500 focus:ring-offset-2 dark:focus:ring-offset-zinc-900"
-				>Delete</button>
-				<div class="flex gap-2">
-					<button type="button" data-dismiss-modal class="rounded px-3 py-1.5 text-sm text-zinc-600 hover:bg-zinc-100 dark:text-zinc-300 dark:hover:bg-zinc-800">Cancel</button>
+				<div class="flex items-center gap-2">
 					<button
 						type="button"
-						hx-post={ rowDoneURL(t) }
+						hx-delete={ taskURL(t) }
 						hx-swap="none"
-						hx-confirm="Mark this task done?"
+						hx-confirm={ deleteConfirmText(t) }
 						data-close-on-success
-						class="rounded bg-emerald-600 px-3 py-1.5 text-sm font-medium text-white hover:bg-emerald-700 focus:outline-none focus:ring-2 focus:ring-emerald-500 focus:ring-offset-2 dark:focus:ring-offset-zinc-900"
-					>Mark done</button>
+						class="rounded bg-red-600 px-3 py-1.5 text-sm font-medium text-white hover:bg-red-700 focus:outline-none focus:ring-2 focus:ring-red-500 focus:ring-offset-2 dark:focus:ring-offset-zinc-900"
+						title={ deleteButtonTitle(t) }
+					>{ deleteButtonLabel(t) }</button>
+					// Secondary actions (Duplicate, Delete series) live in an
+					// overflow menu rather than a chain of footer buttons. With
+					// 4 right-side primary controls the modal footer was
+					// wrapping; collapsing the long-tail to a single ⋯ trigger
+					// keeps the row to two visible buttons on the left.
+					@modalOverflowMenu(t)
+				</div>
+				<div class="flex gap-2">
+					<button type="button" data-dismiss-modal class="rounded px-3 py-1.5 text-sm text-zinc-600 hover:bg-zinc-100 dark:text-zinc-300 dark:hover:bg-zinc-800">Cancel</button>
+					// Mark done / Start / Stop are nonsensical on a recurring
+					// parent template - completing or starting a template
+					// doesn't model anything TW supports cleanly. Instances
+					// keep all three.
+					if !t.IsRecurringParent() {
+						if t.IsActive() {
+							<button
+								type="button"
+								hx-post={ taskStopURL(t) }
+								hx-swap="none"
+								data-close-on-success
+								class="rounded bg-amber-600 px-3 py-1.5 text-sm font-medium text-white hover:bg-amber-700 focus:outline-none focus:ring-2 focus:ring-amber-500 focus:ring-offset-2 dark:focus:ring-offset-zinc-900"
+								title="Stop tracking this task as active"
+							>Stop</button>
+						} else {
+							<button
+								type="button"
+								hx-post={ taskStartURL(t) }
+								hx-swap="none"
+								data-close-on-success
+								class="rounded border border-emerald-600 px-3 py-1.5 text-sm font-medium text-emerald-700 hover:bg-emerald-50 focus:outline-none focus:ring-2 focus:ring-emerald-500 focus:ring-offset-2 dark:border-emerald-500 dark:text-emerald-300 dark:hover:bg-emerald-950/40 dark:focus:ring-offset-zinc-900"
+								title="Mark this task as currently active"
+							>Start</button>
+						}
+						<button
+							type="button"
+							hx-post={ rowDoneURL(t) }
+							hx-swap="none"
+							hx-confirm="Mark this task done?"
+							data-close-on-success
+							class="rounded bg-emerald-600 px-3 py-1.5 text-sm font-medium text-white hover:bg-emerald-700 focus:outline-none focus:ring-2 focus:ring-emerald-500 focus:ring-offset-2 dark:focus:ring-offset-zinc-900"
+						>Mark done</button>
+					}
 					<button type="submit" class="rounded bg-blue-600 px-3 py-1.5 text-sm font-medium text-white hover:bg-blue-700">Save</button>
 				</div>
 			</div>
 		</form>
 	}
+}
+
+// modalEditBanner renders a one-line context hint above the form. Used to
+// flag when the user is editing something other than a normal pending task -
+// recurring template (changes affect future instances), deleted, completed.
+templ modalEditBanner(tone, msg string) {
+	<div class={ modalEditBannerClass(tone) }>{ msg }</div>
+}
+
+// modalOverflowMenu collapses the rarely-used Duplicate (and conditional
+// Delete series) buttons behind a single ⋯ trigger so the modal footer
+// stays compact. Reuses the [data-popover-*] primitive that powers the nav
+// dropdowns; CSS positioning opens the menu UPWARD because the footer is
+// the bottom of the modal and downward would clip.
+templ modalOverflowMenu(t tw.Task) {
+	<span class="relative inline-flex" data-popover-wrap>
+		<button
+			type="button"
+			class="inline-flex h-9 w-9 items-center justify-center rounded border border-zinc-300 text-zinc-600 hover:bg-zinc-100 focus:outline-none focus:ring-2 focus:ring-blue-500 dark:border-zinc-600 dark:text-zinc-300 dark:hover:bg-zinc-800"
+			aria-haspopup="menu"
+			aria-label="More actions"
+			title="More actions"
+			data-popover-trigger
+		>
+			<svg class="h-4 w-4" viewBox="0 0 20 20" fill="currentColor" aria-hidden="true">
+				<circle cx="4" cy="10" r="1.5"></circle>
+				<circle cx="10" cy="10" r="1.5"></circle>
+				<circle cx="16" cy="10" r="1.5"></circle>
+			</svg>
+		</button>
+		<div
+			class="absolute left-0 bottom-full z-30 mb-1 hidden min-w-44 rounded-md border border-zinc-200 bg-white shadow-lg dark:border-zinc-700 dark:bg-zinc-900"
+			role="menu"
+			data-popover-menu
+		>
+			<div class="py-1 text-sm">
+				<button
+					type="button"
+					hx-post={ taskDuplicateURL(t) }
+					hx-swap="none"
+					hx-confirm={ duplicateConfirmText(t) }
+					data-close-on-success
+					data-popover-item
+					class="block w-full px-3 py-1.5 text-left text-sm text-zinc-700 hover:bg-zinc-100 dark:text-zinc-200 dark:hover:bg-zinc-800"
+					title={ duplicateButtonTitle(t) }
+				>Duplicate</button>
+				if t.Parent != "" && !t.IsRecurringParent() {
+					<button
+						type="button"
+						hx-delete={ "/tasks/" + t.Parent }
+						hx-swap="none"
+						hx-confirm="Delete the entire recurring series? Every pending instance will be removed and no future occurrences will be generated."
+						data-close-on-success
+						data-popover-item
+						class="block w-full px-3 py-1.5 text-left text-sm text-red-700 hover:bg-red-50 dark:text-red-300 dark:hover:bg-red-950/40"
+						title="Delete the parent template and every pending instance of this series"
+					>Delete series</button>
+				}
+			</div>
+		</div>
+	</span>
+}
+
+func modalEditTitle(t tw.Task) string {
+	if t.IsRecurringParent() {
+		return "Edit recurring template"
+	}
+	return "Edit task"
+}
+
+// modalEditBannerClass picks the colour palette by tone. Amber for "this
+// affects more than this row" (recurring template); zinc for read-only
+// archival states (deleted, completed) where the warning is informational.
+func modalEditBannerClass(tone string) string {
+	if tone == "amber" {
+		return "border-b border-amber-200 bg-amber-50 px-4 py-2 text-sm text-amber-900 dark:border-amber-900/60 dark:bg-amber-950/40 dark:text-amber-200"
+	}
+	return "border-b border-zinc-200 bg-zinc-50 px-4 py-2 text-sm text-zinc-700 dark:border-zinc-700 dark:bg-zinc-800/40 dark:text-zinc-300"
+}
+
+// deleteButtonLabel / deleteButtonTitle / deleteConfirmText all branch on
+// whether the task is a recurring parent. Killing a parent is destructive
+// across every future instance and gets a louder confirm; killing a child
+// is a single-row action and TW will spawn the next instance regardless.
+func deleteButtonLabel(t tw.Task) string {
+	if t.IsRecurringParent() {
+		return "Delete series"
+	}
+	return "Delete"
+}
+
+func deleteButtonTitle(t tw.Task) string {
+	if t.IsRecurringParent() {
+		return "Delete the entire recurring series and stop generating new instances"
+	}
+	if t.IsRecurring() {
+		return "Delete this instance only - the series will continue spawning new instances"
+	}
+	return "Delete this task"
+}
+
+func deleteConfirmText(t tw.Task) string {
+	if t.IsRecurringParent() {
+		return "Delete the entire recurring series? Future occurrences will stop being generated."
+	}
+	if t.IsRecurring() {
+		return "Delete this instance? The series will continue and the next instance will appear on schedule."
+	}
+	return "Delete this task?"
+}
+
+func duplicateConfirmText(t tw.Task) string {
+	if t.IsRecurring() {
+		return "Create a one-off copy of this task? Recurrence will not be carried over."
+	}
+	return "Create a copy of this task?"
+}
+
+func duplicateButtonTitle(t tw.Task) string {
+	if t.IsRecurring() {
+		return "Duplicate as a one-off task (recurrence is not copied)"
+	}
+	return "Duplicate this task"
 }

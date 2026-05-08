@@ -24,6 +24,12 @@ type Annotation struct {
 // built-ins; these are populated from the raw export by Task.UnmarshalJSON. The
 // map is name -> stringified value so the rendering layer can treat every UDA
 // uniformly without knowing its declared type.
+//
+// Start is the timestamp of the most recent `task <id> start` (empty when
+// the task is not currently active). Recur and Until power the recurrence
+// system: Recur is a Taskwarrior duration expression ("weekly", "1mo",
+// "P7D"), Until is the datestamp at which the recurring template stops
+// spawning instances.
 type Task struct {
 	ID          int               `json:"id"`
 	UUID        string            `json:"uuid"`
@@ -34,6 +40,10 @@ type Task struct {
 	Due         string            `json:"due,omitempty"`
 	Wait        string            `json:"wait,omitempty"`
 	Scheduled   string            `json:"scheduled,omitempty"`
+	Start       string            `json:"start,omitempty"`
+	Recur       string            `json:"recur,omitempty"`
+	Until       string            `json:"until,omitempty"`
+	Parent      string            `json:"parent,omitempty"` // recurring child: parent template UUID
 	Project     string            `json:"project,omitempty"`
 	Tags        []string          `json:"tags,omitempty"`
 	Urgency     float64           `json:"urgency,omitempty"`
@@ -42,11 +52,32 @@ type Task struct {
 	UDAs        map[string]string `json:"-"`
 }
 
+// IsActive reports whether the task is currently being worked on (has a
+// non-empty `start` timestamp - cleared by `task <id> stop`). Mirrors
+// Taskwarrior's `+ACTIVE` virtual tag.
+func (t Task) IsActive() bool { return t.Start != "" }
+
+// IsRecurring reports whether the task carries a recurrence rule. Taskwarrior
+// distinguishes the parent template (status:recurring) from its spawned
+// instances (status:pending with parent:<uuid>); the Recur field appears on
+// both, so this is the simplest test that works for either. A status:deleted
+// instance also still carries Recur, so callers that care about "live and
+// repeating" should combine this with a status check.
+func (t Task) IsRecurring() bool { return t.Recur != "" }
+
+// IsRecurringParent reports whether the task is the recurrence template
+// itself (status:recurring) rather than a spawned instance. Used to gate UI
+// affordances that only make sense on parents (Delete-as-series-kill,
+// Save-changes-future-instances) vs children (Mark done, Start, individual
+// Delete).
+func (t Task) IsRecurringParent() bool { return t.Status == "recurring" }
+
 // taskBuiltinKeys lists every JSON key that Task captures as a typed field (or
 // deliberately ignores). UnmarshalJSON treats anything outside this set as a
-// UDA. Taskwarrior emits a few internal fields we don't model (parent, mask,
-// imask, recur, until, depends, start, end) - skip those rather than
-// mis-classify them as UDAs.
+// UDA. Taskwarrior also emits internal recurrence/lineage bookkeeping
+// (parent, mask, imask, end) that we keep listed here so they're skipped
+// rather than mis-classified as UDAs - they're not surfaced as typed
+// fields because the UI doesn't need them.
 //
 // `priority` is intentionally NOT listed: Taskwarrior 3.x emits it as a
 // top-level JSON key (mirroring the legacy built-in field) even when the
@@ -195,6 +226,18 @@ type AddInput struct {
 	Wait        string
 	Scheduled   string
 	Depends     []string
+	// Recur is a Taskwarrior duration expression ("weekly", "monthly",
+	// "1mo", "P7D"). Empty = not recurring. ModifyArgs emits a bare
+	// `recur:` clear-arg when the field is empty so a recurring task
+	// can be downgraded to a one-off. Validation: shape only - we
+	// can't fully reproduce Taskwarrior's duration parser, so we
+	// reject obvious shell metacharacters and rely on the binary's
+	// own rejection (surfaced via writeIfTaskParseError) for the
+	// rest.
+	Recur string
+	// Until pairs with Recur: an ISO date or Taskwarrior keyword after
+	// which the recurring template stops spawning instances.
+	Until string
 }
 
 // IDPattern matches Taskwarrior task references: numeric short ID or full UUID.
@@ -222,6 +265,18 @@ var TagPattern = regexp.MustCompile(`^[a-zA-Z0-9_-]+$`)
 // Taskwarrior date form (ISO has hyphens, keywords have letters,
 // durations have a unit letter).
 var datePattern = regexp.MustCompile(`^[a-zA-Z0-9:_+\-]*[a-zA-Z\-][a-zA-Z0-9:_+\-]*$`)
+
+// recurPattern is the shape filter for recurrence expressions. Taskwarrior
+// accepts a wide grammar - keyword aliases ("weekly", "monthly", "annually",
+// "biweekly", "fortnight", "quarterly", "semiannual"), numeric-with-unit
+// ("1d", "2w", "1mo", "3y"), fractional durations ("1.5d", "0.5w"), and
+// ISO-8601 durations ("P7D", "P1M", "PT1H"). Reproducing the full parser
+// here would be wrong; we accept a permissive charset (letters, digits,
+// period for fractions, the lone +/- prefix Taskwarrior allows for signed
+// durations) and let Taskwarrior reject the rest at runtime via
+// writeIfTaskParseError. This is strictly tighter than the date pattern
+// because recurrence has no colons or hyphens (no "due-3d" form).
+var recurPattern = regexp.MustCompile(`^[+\-]?[a-zA-Z0-9.]+$`)
 
 var ErrInvalid = errors.New("invalid input")
 
@@ -310,11 +365,19 @@ func (in AddInput) buildArgs(clear bool) ([]string, error) {
 		{"due", in.Due},
 		{"wait", in.Wait},
 		{"scheduled", in.Scheduled},
+		{"until", in.Until},
 	} {
 		args, err = appendOrClear(args, df.name, df.value, datePattern, clear)
 		if err != nil {
 			return nil, err
 		}
+	}
+
+	// Recur uses its own pattern (durations, not dates). Empty + clear ==
+	// true emits `recur:` to downgrade a recurring task to a one-off.
+	args, err = appendOrClear(args, "recur", in.Recur, recurPattern, clear)
+	if err != nil {
+		return nil, err
 	}
 
 	// Depends is a strict subset of the optional-field shape: AddArgs only
@@ -367,4 +430,3 @@ func dependsArg(deps []string) (string, error) {
 	}
 	return "depends:" + strings.Join(deps, ","), nil
 }
-

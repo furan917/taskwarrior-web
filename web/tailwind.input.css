@@ -49,7 +49,7 @@
     background-color: #eff6ff;
   }
 
-  [data-context-wrap][data-open="1"] [data-context-menu] {
+  [data-popover-wrap][data-open="1"] [data-popover-menu] {
     display: block !important;
   }
 }

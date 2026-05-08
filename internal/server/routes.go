@@ -38,6 +38,10 @@ func registerRoutes(mux *http.ServeMux, cfg Config) {
 	app.HandleFunc("GET /ready", v.Report("ready"))
 	app.HandleFunc("GET /agenda", v.Report("agenda"))
 	app.HandleFunc("GET /forecast", v.Report("forecast"))
+	// /r/{name} surfaces any user-defined report from the taskrc that isn't
+	// one of the curated four. The handler validates the name against
+	// tw.ReportNamePattern and 404s for anything not in ReportsCached.
+	app.HandleFunc("GET /r/{name}", v.ReportByName)
 	app.HandleFunc("GET /project/{name}", v.Project)
 	app.HandleFunc("GET /tag/{name}", v.Tag)
 	app.HandleFunc("GET /browse", v.Labels)
@@ -50,12 +54,16 @@ func registerRoutes(mux *http.ServeMux, cfg Config) {
 	app.HandleFunc("POST /tasks", t.Create)
 	app.HandleFunc("PUT /tasks/{id}", t.Modify)
 	app.HandleFunc("POST /tasks/{id}/done", t.Done)
+	app.HandleFunc("POST /tasks/{id}/start", t.Start)
+	app.HandleFunc("POST /tasks/{id}/stop", t.Stop)
+	app.HandleFunc("POST /tasks/{id}/duplicate", t.Duplicate)
 	app.HandleFunc("DELETE /tasks/{id}", t.Delete)
 	app.HandleFunc("POST /tasks/bulk/done", t.BulkDone)
 	app.HandleFunc("POST /tasks/bulk/delete", t.BulkDelete)
 	app.HandleFunc("POST /tasks/{id}/annotate", t.Annotate)
 	app.HandleFunc("POST /tasks/{id}/denotate", t.Denotate)
 	app.HandleFunc("GET /done", v.Done)
+	app.HandleFunc("GET /stats", v.Stats)
 	app.HandleFunc("POST /undo", t.Undo)
 	app.HandleFunc("POST /context", c.Set)
 

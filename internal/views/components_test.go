@@ -595,10 +595,10 @@ func TestCalendarDayTaskClass(t *testing.T) {
 
 func TestContextPrefill(t *testing.T) {
 	cases := []struct {
-		name          string
-		filter        string
-		wantProject   string
-		wantTag       string
+		name        string
+		filter      string
+		wantProject string
+		wantTag     string
 	}{
 		{"empty", "", "", ""},
 		{"project only", "project:team", "team", ""},
