@@ -493,6 +493,16 @@ func IsNoOpExit(err error) bool {
 	return noOpExitPattern.MatchString(te.Stdout)
 }
 
+// IsNotInitialised reports whether err is a TaskExitError caused by a missing
+// ~/.taskrc — Taskwarrior exits 2 with this message when it has never been run.
+func IsNotInitialised(err error) bool {
+	var te *TaskExitError
+	if !errors.As(err, &te) {
+		return false
+	}
+	return strings.Contains(te.Stderr, "Cannot proceed without rc file")
+}
+
 func (e *TaskExitError) Error() string {
 	if e.ExitCode >= 0 {
 		return fmt.Sprintf("task command failed: exit status %d", e.ExitCode)

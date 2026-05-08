@@ -192,7 +192,11 @@ func (v *Views) renderReport(w http.ResponseWriter, r *http.Request, name string
 	tasks, err := v.fetch(r, spec.filter)
 	if err != nil {
 		v.Logger.Error("report fetch failed", "report", name, "err", err)
-		http.Error(w, "task export failed", http.StatusInternalServerError)
+		msg := "task export failed"
+		if tw.IsNotInitialised(err) {
+			msg = "Taskwarrior is not initialised — run `task` once in a terminal to create ~/.taskrc, then reload"
+		}
+		http.Error(w, msg, http.StatusInternalServerError)
 		return
 	}
 	page := v.buildPage(r, spec.title, spec.active, true)
