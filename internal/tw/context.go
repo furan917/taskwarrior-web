@@ -83,3 +83,21 @@ func (c Context) SafeWriteFilter() string {
 	}
 	return c.WriteFilter
 }
+
+// SanitizeUserFilter trims whitespace and returns the filter expression if it
+// is safe to pass to `task export` as a user-supplied filter. Returns empty
+// string when the input contains rc.* override tokens so a hostile or
+// accidental rc.* string cannot alter Taskwarrior's runtime config through
+// the filter box. Export-incompatible -+tag syntax is left for Taskwarrior
+// to reject (rather than silently stripped) so the user sees an error they
+// can act on.
+func SanitizeUserFilter(raw string) string {
+	f := strings.TrimSpace(raw)
+	if f == "" {
+		return ""
+	}
+	if FilterContainsRcOverride(f) {
+		return ""
+	}
+	return f
+}

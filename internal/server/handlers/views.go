@@ -189,7 +189,8 @@ func (v *Views) ReportByName(w http.ResponseWriter, r *http.Request) {
 // the spec's filter, sort, render via ListPage. Pulled out so the two
 // entry points stay one-liners.
 func (v *Views) renderReport(w http.ResponseWriter, r *http.Request, name string, spec reportSpec) {
-	tasks, err := v.fetch(r, spec.filter)
+	filterArgs := append(splitFilter(spec.filter), v.userFilter(r))
+	tasks, err := v.fetch(r, filterArgs...)
 	if err != nil {
 		v.Logger.Error("report fetch failed", "report", name, "err", err)
 		http.Error(w, exportErrMsg(err), http.StatusInternalServerError)
@@ -197,7 +198,7 @@ func (v *Views) renderReport(w http.ResponseWriter, r *http.Request, name string
 	}
 	page := v.buildPage(r, spec.title, spec.active, true)
 	renderHTML(w, r, "Report",
-		views.ListPage(page, name, "", tasks, views.ParseSort(r.URL.Query())),
+		views.ListPage(page, name, "", tasks, views.ParseSort(r.URL.Query()), v.userFilter(r)),
 		v.Logger, "report", name)
 }
 
@@ -252,7 +253,7 @@ func (v *Views) Tag(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "invalid tag name", http.StatusBadRequest)
 		return
 	}
-	tasks, err := v.fetch(r, "(status:pending or status:waiting) +"+name)
+	tasks, err := v.fetch(r, "(status:pending or status:waiting) +"+name, v.userFilter(r))
 	if err != nil {
 		v.Logger.Error("tag fetch failed", "tag", name, "err", err)
 		http.Error(w, exportErrMsg(err), http.StatusInternalServerError)
@@ -260,7 +261,7 @@ func (v *Views) Tag(w http.ResponseWriter, r *http.Request) {
 	}
 	page := v.buildPage(r, "+"+name, "", true)
 	renderHTML(w, r, "Tag",
-		views.ListPage(page, "tag-"+name, "", tasks, views.ParseSort(r.URL.Query())),
+		views.ListPage(page, "tag-"+name, "", tasks, views.ParseSort(r.URL.Query()), v.userFilter(r)),
 		v.Logger, "tag", name)
 }
 
@@ -271,7 +272,7 @@ func (v *Views) Project(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "invalid project name", http.StatusBadRequest)
 		return
 	}
-	tasks, err := v.fetch(r, "(status:pending or status:waiting) project:"+name)
+	tasks, err := v.fetch(r, "(status:pending or status:waiting) project:"+name, v.userFilter(r))
 	if err != nil {
 		v.Logger.Error("project fetch failed", "project", name, "err", err)
 		http.Error(w, exportErrMsg(err), http.StatusInternalServerError)
@@ -279,7 +280,7 @@ func (v *Views) Project(w http.ResponseWriter, r *http.Request) {
 	}
 	page := v.buildPage(r, "project: "+name, "", true)
 	renderHTML(w, r, "Project",
-		views.ListPage(page, "", name, tasks, views.ParseSort(r.URL.Query())),
+		views.ListPage(page, "", name, tasks, views.ParseSort(r.URL.Query()), v.userFilter(r)),
 		v.Logger, "project", name)
 }
 
@@ -328,6 +329,38 @@ func (v *Views) Calendar(w http.ResponseWriter, r *http.Request) {
 	renderHTML(w, r, "Calendar", views.Calendar(page), v.Logger)
 }
 
+// splitFilter splits a Taskwarrior filter string into individual argv tokens
+// while keeping parenthesised groups intact. Simple whitespace split breaks
+// filters like "(status:pending or status:waiting) (due.before:14d or ...)"
+// because the parens span multiple words; splitting only at depth-0 spaces
+// preserves each group as one argument that Taskwarrior can parse correctly.
+func splitFilter(f string) []string {
+	if f == "" {
+		return nil
+	}
+	var tokens []string
+	depth, start := 0, 0
+	for i := 0; i < len(f); i++ {
+		switch f[i] {
+		case '(':
+			depth++
+		case ')':
+			depth--
+		case ' ':
+			if depth == 0 && i > start {
+				tokens = append(tokens, f[start:i])
+				start = i + 1
+			} else if depth == 0 {
+				start = i + 1
+			}
+		}
+	}
+	if start < len(f) {
+		tokens = append(tokens, f[start:])
+	}
+	return tokens
+}
+
 // exportWithContext wraps tw.Client.Export, prepending the active context's
 // read filter as a parenthesised AND clause when one is set. Taskwarrior
 // 3.x's `task export` does NOT honour the active context implicitly (unlike
@@ -352,14 +385,23 @@ func (v *Views) exportWithContext(r *http.Request, filters ...string) ([]tw.Task
 
 // fetch is exportWithContext + the URL's sort spec applied. Used by the
 // list-style read handlers (Report / Tag / Project / partials) where the
-// URL carries an optional ?sort=key:dir.
-func (v *Views) fetch(r *http.Request, filter string) ([]tw.Task, error) {
-	tasks, err := v.exportWithContext(r, filter)
+// URL carries an optional ?sort=key:dir. Accepts variadic filters so callers
+// can pass the view filter and the user-supplied ad-hoc filter independently;
+// empty strings are dropped by exportWithContext.
+func (v *Views) fetch(r *http.Request, filters ...string) ([]tw.Task, error) {
+	tasks, err := v.exportWithContext(r, filters...)
 	if err != nil {
 		return nil, err
 	}
 	applySort(tasks, views.ParseSort(r.URL.Query()))
 	return tasks, nil
+}
+
+// userFilter reads the raw ?filter= query param and sanitizes it before use.
+// rc.* override tokens are stripped silently; anything else is passed through
+// to Taskwarrior which returns an error the caller can surface.
+func (v *Views) userFilter(r *http.Request) string {
+	return tw.SanitizeUserFilter(r.URL.Query().Get("filter"))
 }
 
 // exportErrMsg maps a task export error to a user-facing message. Keeps all

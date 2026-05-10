@@ -97,6 +97,21 @@ func urgencyPercent(score float64) float64 {
 // Sibling of dueBadgeClass (format.go): both are score/time-derived class
 // helpers that bottom out on the same urgencyTier()-driven palette, so a
 // "critical" row badge and a "critical" urgency bar always share a hue.
+// urgencyDotColour returns the background-only Tailwind class for the
+// small dot indicators used in the mobile calendar strip.
+func urgencyDotColour(score float64) string {
+	switch urgencyTier(score) {
+	case "critical":
+		return "bg-red-500"
+	case "high":
+		return "bg-orange-400"
+	case "med":
+		return "bg-yellow-400"
+	default:
+		return "bg-blue-500"
+	}
+}
+
 func urgencyBarColour(score float64) string {
 	switch urgencyTier(score) {
 	case "critical":

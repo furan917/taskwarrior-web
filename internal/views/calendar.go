@@ -108,7 +108,7 @@ func calendarChipClass(c CalendarChip) string {
 	case "end":
 		rounded = "rounded-r rounded-l-none"
 	}
-	return "block w-full truncate px-1.5 py-0.5 text-left text-[11px] font-medium hover:opacity-90 " + colour + " " + rounded
+	return "block w-full overflow-hidden px-1.5 py-0.5 text-left text-[11px] font-medium hover:opacity-90 " + colour + " " + rounded
 }
 
 // calendarDayTaskClass is the wrapper for the day-view list items.
@@ -181,6 +181,22 @@ func capSpanStart(start, end time.Time) time.Time {
 		return cap
 	}
 	return start
+}
+
+func calendarMobileStripCellClass(c CalendarCell) string {
+	base := "flex flex-col items-center py-2"
+	if !c.InPeriod {
+		return base + " opacity-30"
+	}
+	return base
+}
+
+func calendarWeekMobileDayHeaderClass(c CalendarCell) string {
+	base := "flex items-center border-b border-zinc-200 px-3 py-2 dark:border-zinc-800"
+	if c.IsToday {
+		return base + " bg-blue-50 dark:bg-blue-950/40"
+	}
+	return base + " bg-zinc-50 dark:bg-zinc-950"
 }
 
 // SortChipsByUrgency sorts chips in-place by urgency descending so the

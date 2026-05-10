@@ -409,19 +409,29 @@ func TestPartialURL(t *testing.T) {
 }
 
 func TestPartialURLWithSort(t *testing.T) {
-	// Default sort is omitted from the URL to keep polling URLs clean.
-	if got := partialURLWithSort("next", "", DefaultSort); got != "/partials/list?report=next" {
+	// Default sort, no filter: omit both params.
+	if got := partialURLWithSort("next", "", DefaultSort, ""); got != "/partials/list?report=next" {
 		t.Errorf("default: got %q", got)
 	}
-	// Non-default sort is appended.
-	got := partialURLWithSort("next", "", SortSpec{Key: "due", Asc: true})
+	// Non-default sort, no filter.
+	got := partialURLWithSort("next", "", SortSpec{Key: "due", Asc: true}, "")
 	if got != "/partials/list?report=next&sort=due:asc" {
 		t.Errorf("explicit due asc: got %q", got)
 	}
-	// Project drilldown.
-	got = partialURLWithSort("", "team.alpha", SortSpec{Key: "project", Asc: true})
+	// Project drilldown with sort.
+	got = partialURLWithSort("", "team.alpha", SortSpec{Key: "project", Asc: true}, "")
 	if got != "/partials/list?project=team.alpha&sort=project:asc" {
 		t.Errorf("project drilldown: got %q", got)
+	}
+	// Filter only (default sort).
+	got = partialURLWithSort("next", "", DefaultSort, "+work")
+	if got != "/partials/list?report=next&filter=%2Bwork" {
+		t.Errorf("filter only: got %q", got)
+	}
+	// Sort + filter together.
+	got = partialURLWithSort("next", "", SortSpec{Key: "due", Asc: true}, "priority:H")
+	if got != "/partials/list?report=next&sort=due:asc&filter=priority%3AH" {
+		t.Errorf("sort+filter: got %q", got)
 	}
 }
 

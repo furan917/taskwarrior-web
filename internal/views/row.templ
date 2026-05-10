@@ -26,10 +26,10 @@ templ DoneRow(t tw.Task) {
 //     destructive action is purging them entirely)
 templ rowFrame(t tw.Task, done bool) {
 	<li id={ "task-" + taskKey(t) } data-expanded="0" class={ "group " + RowCardClass(!done && t.IsActive()) }>
-		<div class="flex items-center gap-3 p-3">
+		<div class="flex items-start gap-3 p-3">
 			<input
 				type="checkbox"
-				class="task-select h-4 w-4 flex-none rounded border-zinc-300 text-blue-600 focus:ring-blue-500 dark:border-zinc-600 dark:bg-zinc-800"
+				class="task-select mt-0.5 h-4 w-4 flex-none rounded border-zinc-300 text-blue-600 focus:ring-blue-500 dark:border-zinc-600 dark:bg-zinc-800"
 				data-task-id={ taskKey(t) }
 				aria-label="Select for bulk action"
 			/>
@@ -39,7 +39,7 @@ templ rowFrame(t tw.Task, done bool) {
 					hx-post={ rowDoneURL(t) }
 					hx-swap="none"
 					hx-confirm="Mark this task done?"
-					class="row-action-done h-5 w-5 flex-none rounded-full border border-zinc-300 transition hover:border-emerald-500 hover:bg-emerald-50 dark:border-zinc-600 dark:hover:border-emerald-500 dark:hover:bg-emerald-950/40"
+					class="row-action-done mt-0.5 h-5 w-5 flex-none rounded-full border border-zinc-300 transition hover:border-emerald-500 hover:bg-emerald-50 dark:border-zinc-600 dark:hover:border-emerald-500 dark:hover:bg-emerald-950/40"
 					title="Mark done"
 					aria-label="Mark done"
 				></button>
@@ -84,7 +84,9 @@ templ rowFrame(t tw.Task, done bool) {
 					}
 				</div>
 			</div>
-			@Urgency(t.Urgency)
+			<div class="hidden sm:block">
+				@Urgency(t.Urgency)
+			</div>
 			if done {
 				<button
 					type="button"
@@ -229,6 +231,9 @@ templ rowDetailGrid(t tw.Task) {
 		if t.Start != "" {
 			@detailRow("Active since", "left") {
 				{ humanDateTime(t.Start) }
+				if r := runningFor(t.Start); r != "" {
+					<span class="ml-1.5 text-amber-600 dark:text-amber-400">({ r })</span>
+				}
 			}
 		}
 		// Long fields (Tags, Notes, Blocked by, UDAs section) use the "long"

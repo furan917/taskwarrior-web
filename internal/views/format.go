@@ -55,6 +55,41 @@ func sortedUDANames(m map[string]string) []string {
 	return keys
 }
 
+// runningFor returns a compact duration string ("2h 14m", "47m", "3d 2h")
+// describing how long a task has been active. Uses the current wall clock so
+// each page render reflects real elapsed time. Returns "" if the start
+// timestamp is empty or unparseable.
+func runningFor(startStr string) string {
+	if startStr == "" {
+		return ""
+	}
+	start, err := tw.ParseTime(startStr)
+	if err != nil || start.IsZero() {
+		return ""
+	}
+	return formatElapsed(time.Since(start))
+}
+
+// formatElapsed converts a duration into a compact human string. Used by
+// runningFor (active task display) and the timesheet view (session totals).
+func formatElapsed(d time.Duration) string {
+	if d <= 0 {
+		return "< 1m"
+	}
+	h := int(d.Hours())
+	m := int(d.Minutes()) % 60
+	switch {
+	case h == 0 && m == 0:
+		return "< 1m"
+	case h == 0:
+		return fmt.Sprintf("%dm", m)
+	case h < 24:
+		return fmt.Sprintf("%dh %dm", h, m)
+	default:
+		return fmt.Sprintf("%dd %dh", h/24, h%24)
+	}
+}
+
 // humanDate parses a Taskwarrior YYYYMMDDTHHMMSSZ timestamp and renders it as
 // YYYY-MM-DD in the user's local zone - what the form should pre-fill so the
 // user sees something readable. Empty input returns empty. Unparseable input

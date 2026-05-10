@@ -330,14 +330,27 @@ If the modify lands but the annotation fails (very rare; only the second `task` 
 
 Each row carries a small play / stop button between the bulk-select checkbox and the description: a grey play triangle when the task is inactive (POSTs to `/tasks/{id}/start`, marking it `+ACTIVE`), an amber stop square when the task is currently being tracked (POSTs to `/tasks/{id}/stop`, clearing the `start` timestamp). The button is intentionally hidden on `status:recurring` parents - you can't track time on a template, only on its child instances. The same Start / Stop pair appears in the edit modal next to the Save row, so kicking off a session from the calendar's chip-click flow is one click.
 
-Active tasks render the `+ACTIVE` virtual tag in the row's chip strip and are surfaced as a count card on `/stats` ("Active N"). There's no nav-bar indicator across pages and no accumulated-time display per task; if you need cumulative time, use Taskwarrior's CLI reports (`task <id> info` shows the start, `task summary` shows aggregate).
+Active tasks render the `+ACTIVE` virtual tag in the row's chip strip and are surfaced as a count card on `/stats` ("Active N"). An amber pill in the top-right of the nav shows the currently tracked task(s) across every page: click it to expand a dropdown listing active tasks with inline stop buttons, or click the task description to open its edit modal.
+
+## Timesheet
+
+`/timesheet` shows a log of every start/stop session recorded by Taskwarrior's `journal.time` annotation mechanism. Two modes:
+
+- **Week** (default) - 7-column grid (Mon–Sun), each cell showing session chips with description, time range, and duration. Today gets a blue tint. Mobile renders as a vertical day list; days with no sessions are omitted.
+- **Day** - flat chronological list for a single day with description, project, time range, and duration per row.
+
+Step periods with the prev/next arrows; jump to the current period with Today. Total duration for the week (or day) appears in the column headers.
+
+Active sessions (no stop time yet) render with an amber left border so in-progress work is visually distinct from completed sessions.
+
+If `journal.time` is not enabled in `~/.taskrc`, the page shows a prompt explaining what's needed and a one-click **Enable time tracking** button that writes `journal.time=yes` to `~/.taskrc`. Past sessions cannot be recovered; only future start/stop events are recorded.
 
 ## Known limitations
 
 - **No SSE.** Polling at 30s only.
 - **No drag/drop reordering.** Sort is via column headers, not by hand.
 - **Search is substring-only.** No way to compose `priority:H and project:hiring` ad-hoc through the search box; use a context or a defined report.
-- **No nav-level active timer indicator.** Per-row start/stop works, but there's no persistent "task X is running" pill on the header to remind you across page navigations.
+- **No SSE for timesheet.** The timesheet page doesn't live-update the duration of in-progress sessions; reload or navigate away and back to see the current elapsed time.
 
 ## Where things live
 

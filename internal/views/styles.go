@@ -50,10 +50,20 @@ const PollIntervalSeconds = 30
 // snappy without flooding the server.
 const SearchDebounceMs = 200
 
+// FilterDebounceMs is the debounce for the ad-hoc Taskwarrior filter input.
+// Slightly longer than SearchDebounceMs because each keystroke triggers a
+// `task export` subprocess rather than an in-memory substring scan.
+const FilterDebounceMs = 350
+
 // SearchInputWidth is the Tailwind width class for the search input.
 // Surfacing it as a const keeps the magic number out of the template and
 // lets layout adjustments live in one place.
-const SearchInputWidth = "w-48"
+const SearchInputWidth = "w-full sm:w-36"
+
+// FilterInputWidth is the Tailwind width class for the ad-hoc filter input.
+// Wider than search because filter expressions are longer (e.g.
+// "priority:H project:work due.before:eom").
+const FilterInputWidth = "w-full sm:w-56"
 
 // ModalMaxWidth is the Tailwind max-width class shared by every modal
 // dialog. Centralising means one place to widen all modals at once.

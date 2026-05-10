@@ -58,6 +58,8 @@ templ Layout(p Page) {
 			<script src="/static/js/bulk.js" defer></script>
 			<script src="/static/js/search.js" defer></script>
 			<script src="/static/js/sort.js" defer></script>
+			<script src="/static/js/filter.js" defer></script>
+			<script src="/static/js/active_indicator.js" defer></script>
 			<script src="/static/js/row_expand.js" defer></script>
 			<script src="/static/js/context_pill.js" defer></script>
 			<script src="/static/js/context_picker.js" defer></script>
@@ -65,9 +67,11 @@ templ Layout(p Page) {
 			<script src="/static/js/deps.js" defer></script>
 			<script src="/static/js/form_validation.js" defer></script>
 			<script src="/static/js/date_presets.js" defer></script>
+			<script src="/static/js/chip_scroll.js" defer></script>
+			<script src="/static/js/mobile_nav.js" defer></script>
 		</head>
 		<body class="bg-zinc-50 text-zinc-900 antialiased min-h-screen dark:bg-zinc-950 dark:text-zinc-100">
-			<main class="container mx-auto max-w-5xl p-6">
+			<main class="container mx-auto max-w-6xl p-3 sm:p-6">
 				<header class="mb-4 flex items-baseline justify-between">
 					<a href="/" class="text-2xl font-semibold tracking-tight">taskwarrior-web</a>
 					<div class="flex items-baseline gap-3">
@@ -95,7 +99,7 @@ templ Layout(p Page) {
 // gated on p.HasTaskList; the others render on every page. The list lives
 // in the views.Keybindings slice so this footer and helpDialog stay in sync.
 templ keyHint(p Page) {
-	<footer class="mt-12 flex flex-wrap items-center gap-x-3 gap-y-2 border-t border-zinc-200 pt-3 text-xs text-zinc-400 dark:border-zinc-800 dark:text-zinc-500">
+	<footer class="mt-12 hidden flex-wrap items-center gap-x-3 gap-y-2 border-t border-zinc-200 pt-3 text-xs text-zinc-400 sm:flex dark:border-zinc-800 dark:text-zinc-500">
 		for _, kb := range Keybindings {
 			if kb.InFooter && (!kb.RowListOnly || p.HasTaskList) {
 				@kh(kb.Key, kb.FooterLabel)

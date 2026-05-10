@@ -1,0 +1,77 @@
+package views
+
+import (
+	"strconv"
+	"time"
+
+	"github.com/furan917/taskwarrior-web/internal/tw"
+)
+
+// ActiveIndicatorContent is the innerHTML of the #active-indicator polling
+// div in the nav. Empty when no tasks are active; otherwise an amber chip
+// that shows elapsed time (single task) or a count (multiple tasks), and
+// expands to a dropdown listing each active task with its elapsed time.
+templ ActiveIndicatorContent(tasks []tw.Task, now time.Time) {
+	if len(tasks) > 0 {
+		<details data-active-dropdown class="relative">
+			<summary
+				class="[&::-webkit-details-marker]:hidden list-none cursor-pointer inline-flex items-center gap-1.5 rounded border border-amber-300 bg-amber-50 px-2.5 py-1 text-sm font-medium text-amber-700 select-none hover:bg-amber-100 focus:outline-none focus:ring-2 focus:ring-amber-500 focus:ring-offset-1 dark:border-amber-700/60 dark:bg-amber-950/30 dark:text-amber-400 dark:hover:bg-amber-900/40"
+				aria-label={ strconv.Itoa(len(tasks)) + " active task(s)" }
+			>
+				<svg class="hidden h-3 w-3 fill-current sm:block" viewBox="0 0 20 20" aria-hidden="true">
+					<polygon points="6 4 16 10 6 16"></polygon>
+				</svg>
+				if len(tasks) == 1 {
+					<span>{ formatElapsed(activeDuration(tasks[0], now)) }</span>
+				} else {
+					<span>{ strconv.Itoa(len(tasks)) }</span>
+				}
+			</summary>
+			<div class="absolute right-0 top-full z-30 mt-1 w-80 rounded-md border border-zinc-200 bg-white py-1 shadow-lg dark:border-zinc-700 dark:bg-zinc-900">
+				for _, t := range tasks {
+					<div class="flex items-center gap-1 px-2 py-1 hover:bg-zinc-50 dark:hover:bg-zinc-800/50">
+						<button
+							data-active-task-item
+							type="button"
+							hx-post={ taskStopURL(t) }
+							hx-swap="none"
+							class="inline-flex h-6 w-6 shrink-0 items-center justify-center rounded bg-amber-100 text-amber-700 hover:bg-amber-200 dark:bg-amber-900/40 dark:text-amber-400 dark:hover:bg-amber-800/60"
+							title="Stop tracking"
+							aria-label="Stop tracking"
+						>
+							<svg class="h-2.5 w-2.5" viewBox="0 0 10 10" fill="currentColor" aria-hidden="true">
+								<rect x="0" y="0" width="10" height="10" rx="1"></rect>
+							</svg>
+						</button>
+						<button
+							data-active-task-item
+							type="button"
+							hx-get={ rowEditURL(t) }
+							hx-target="#modal"
+							class="flex min-w-0 flex-1 items-baseline justify-between gap-3 rounded px-2 py-1 text-left text-sm hover:bg-zinc-100 dark:hover:bg-zinc-800"
+							title={ t.Description }
+						>
+							<span class="min-w-0 flex-1 truncate text-zinc-700 dark:text-zinc-300">{ t.Description }</span>
+							<span class="shrink-0 text-xs text-amber-600 dark:text-amber-400">{ formatElapsed(activeDuration(t, now)) }</span>
+						</button>
+					</div>
+				}
+			</div>
+		</details>
+	}
+}
+
+func activeDuration(t tw.Task, now time.Time) time.Duration {
+	if t.Start == "" {
+		return 0
+	}
+	start, err := tw.ParseTime(t.Start)
+	if err != nil || start.IsZero() {
+		return 0
+	}
+	d := now.Sub(start)
+	if d < 0 {
+		return 0
+	}
+	return d
+}

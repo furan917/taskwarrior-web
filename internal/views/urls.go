@@ -135,18 +135,26 @@ func partialURL(report, project string) string {
 	return "/partials/list?report=" + report
 }
 
-// partialURLWithSort builds the polling URL including the current sort param.
-// When the sort matches DefaultSort the param is omitted to keep URLs clean.
-func partialURLWithSort(report, project string, s SortSpec) string {
+// partialURLWithSort builds the polling URL including the current sort and
+// filter params. Default sort is omitted to keep URLs clean; empty filter is
+// also omitted.
+func partialURLWithSort(report, project string, s SortSpec, filter string) string {
 	base := partialURL(report, project)
-	if s.Key == DefaultSort.Key && s.Asc == DefaultSort.Asc {
+	var extras []string
+	if !(s.Key == DefaultSort.Key && s.Asc == DefaultSort.Asc) {
+		extras = append(extras, "sort="+FormatSort(s))
+	}
+	if filter != "" {
+		extras = append(extras, "filter="+url.QueryEscape(filter))
+	}
+	if len(extras) == 0 {
 		return base
 	}
 	sep := "&"
 	if !strings.Contains(base, "?") {
 		sep = "?"
 	}
-	return base + sep + "sort=" + FormatSort(s)
+	return base + sep + strings.Join(extras, "&")
 }
 
 // sortURL builds the hx-get for a sortable column header. Clicking the
@@ -209,4 +217,9 @@ func calendarSwitchURL(p CalendarPage, mode string) string {
 // calendarDayURL is the link from a month/week cell to that day's view.
 func calendarDayURL(d time.Time) string {
 	return fmt.Sprintf("/calendar?view=day&date=%s", d.Format("2006-01-02"))
+}
+
+// timesheetSwitchURL preserves the current anchor date when toggling view mode.
+func timesheetSwitchURL(data TimesheetData, mode string) string {
+	return fmt.Sprintf("/timesheet?view=%s&date=%s", mode, data.Anchor.Format("2006-01-02"))
 }

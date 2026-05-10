@@ -363,6 +363,20 @@ func parseUDAValues(raw string) []string {
 	return out
 }
 
+// JournalTimeEnabled reports whether `rc.journal.time` is set to "yes" in the
+// active taskrc. With it enabled, taskwarrior appends "Started …" / "Stopped …"
+// annotations on every start/stop call, giving the web UI enough data to build
+// a timesheet.
+func (c *Client) JournalTimeEnabled(ctx context.Context) bool {
+	return strings.EqualFold(c.getRcKey(ctx, "rc.journal.time"), "yes")
+}
+
+// EnableJournalTime writes `journal.time=yes` to the active taskrc via
+// `task config journal.time yes`. Idempotent — safe to call if already on.
+func (c *Client) EnableJournalTime(ctx context.Context) error {
+	return c.Run(ctx, "config", "journal.time", "yes")
+}
+
 // getRcKey looks up a single rc.* key with a short timeout, returning empty
 // string on any error so the caller can fall back to its default. The key is
 // trusted (constructed from a validated UDA name and a constant suffix) so

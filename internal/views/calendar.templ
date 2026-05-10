@@ -85,20 +85,25 @@ templ calendarSwitchLink(p CalendarPage, mode, label string) {
 }
 
 templ calendarMonth(p CalendarPage) {
-	<div class={ CardClass() + " overflow-hidden" }>
-		<div class="grid grid-cols-7 border-b border-zinc-200 bg-zinc-50 text-xs font-semibold uppercase tracking-wide text-zinc-500 dark:border-zinc-800 dark:bg-zinc-950 dark:text-zinc-400">
-			@calendarHeader("Mon")
-			@calendarHeader("Tue")
-			@calendarHeader("Wed")
-			@calendarHeader("Thu")
-			@calendarHeader("Fri")
-			@calendarHeader("Sat")
-			@calendarHeader("Sun")
-		</div>
-		<div class="grid grid-cols-7">
-			for _, c := range p.Cells {
-				@calendarMonthCell(c)
-			}
+	// Mobile: compact dot-matrix navigator
+	@calendarMobileStrip(p.Cells)
+	// Desktop: full chip grid
+	<div class="hidden overflow-x-auto sm:block">
+		<div class={ CardClass() + " min-w-[560px] overflow-hidden" }>
+			<div class="grid grid-cols-7 border-b border-zinc-200 bg-zinc-50 text-xs font-semibold uppercase tracking-wide text-zinc-500 dark:border-zinc-800 dark:bg-zinc-950 dark:text-zinc-400">
+				@calendarHeader("Mon")
+				@calendarHeader("Tue")
+				@calendarHeader("Wed")
+				@calendarHeader("Thu")
+				@calendarHeader("Fri")
+				@calendarHeader("Sat")
+				@calendarHeader("Sun")
+			</div>
+			<div class="grid grid-cols-7">
+				for _, c := range p.Cells {
+					@calendarMonthCell(c)
+				}
+			</div>
 		</div>
 	</div>
 }
@@ -130,18 +135,23 @@ templ calendarMonthCell(c CalendarCell) {
 }
 
 templ calendarWeek(p CalendarPage) {
-	<div class={ CardClass() + " overflow-hidden" }>
-		<div class="grid grid-cols-7 border-b border-zinc-200 bg-zinc-50 text-xs font-semibold uppercase tracking-wide text-zinc-500 dark:border-zinc-800 dark:bg-zinc-950 dark:text-zinc-400">
-			for _, c := range p.Cells {
-				<div class="px-2 py-1.5">
-					{ c.Date.Format("Mon 2") }
-				</div>
-			}
-		</div>
-		<div class="grid grid-cols-7">
-			for _, c := range p.Cells {
-				@calendarWeekCell(c)
-			}
+	// Mobile: vertical day-by-day list
+	@calendarWeekMobile(p.Cells)
+	// Desktop: 7-column chip grid
+	<div class="hidden overflow-x-auto sm:block">
+		<div class={ CardClass() + " min-w-[560px] overflow-hidden" }>
+			<div class="grid grid-cols-7 border-b border-zinc-200 bg-zinc-50 text-xs font-semibold uppercase tracking-wide text-zinc-500 dark:border-zinc-800 dark:bg-zinc-950 dark:text-zinc-400">
+				for _, c := range p.Cells {
+					<div class="px-2 py-1.5">
+						{ c.Date.Format("Mon 2") }
+					</div>
+				}
+			</div>
+			<div class="grid grid-cols-7">
+				for _, c := range p.Cells {
+					@calendarWeekCell(c)
+				}
+			</div>
 		</div>
 	</div>
 }
@@ -203,6 +213,75 @@ templ calendarDay(p CalendarPage) {
 	</section>
 }
 
+// calendarMobileStrip is the compact 7-column dot-matrix used in month view
+// on mobile. Each cell shows just the day number + an urgency-coloured dot
+// when tasks exist. Tapping any cell navigates to that day's day view.
+templ calendarMobileStrip(cells []CalendarCell) {
+	<div class={ CardClass() + " overflow-hidden sm:hidden" }>
+		<div class="grid grid-cols-7 border-b border-zinc-200 bg-zinc-50 text-center text-[10px] font-semibold uppercase tracking-wide text-zinc-500 dark:border-zinc-800 dark:bg-zinc-950 dark:text-zinc-400">
+			for _, h := range []string{"M", "T", "W", "T", "F", "S", "S"} {
+				<div class="py-1.5">{ h }</div>
+			}
+		</div>
+		<div class="grid grid-cols-7">
+			for _, c := range cells {
+				@calendarMobileStripCell(c)
+			}
+		</div>
+	</div>
+}
+
+templ calendarMobileStripCell(c CalendarCell) {
+	<a
+		href={ templ.SafeURL(calendarDayURL(c.Date)) }
+		class={ calendarMobileStripCellClass(c) }
+	>
+		<span class={ calendarDayNumberClass(c) }>{ fmt.Sprintf("%d", c.Date.Day()) }</span>
+		if len(c.Chips) > 0 && c.InPeriod {
+			<span class={ "mx-auto mt-0.5 block h-1 w-1 rounded-full " + urgencyDotColour(c.Chips[0].Task.Urgency) }></span>
+		} else {
+			<span class="mt-0.5 block h-1"></span>
+		}
+	</a>
+}
+
+// calendarWeekMobile renders a vertical day-by-day list for week view on mobile.
+// Each day is a card with a header and clickable task rows.
+templ calendarWeekMobile(cells []CalendarCell) {
+	<div class="space-y-2 sm:hidden">
+		for _, c := range cells {
+			@calendarWeekMobileDay(c)
+		}
+	</div>
+}
+
+templ calendarWeekMobileDay(c CalendarCell) {
+	<div class={ CardClass() + " overflow-hidden" }>
+		<div class={ calendarWeekMobileDayHeaderClass(c) }>
+			<a href={ templ.SafeURL(calendarDayURL(c.Date)) } class={ calendarDayNumberClass(c) }>
+				{ c.Date.Format("Mon 2 Jan") }
+			</a>
+		</div>
+		if len(c.Chips) == 0 {
+			<p class="px-3 py-2 text-xs text-zinc-400 dark:text-zinc-600">No tasks</p>
+		} else {
+			<div class="divide-y divide-zinc-100 dark:divide-zinc-800">
+				for _, chip := range c.Chips {
+					<button
+						type="button"
+						hx-get={ rowEditURL(chip.Task) }
+						hx-target="#modal"
+						class="flex w-full items-center gap-2 px-3 py-2 text-left hover:bg-zinc-50 dark:hover:bg-zinc-800/60"
+					>
+						<span class={ "h-2 w-2 shrink-0 rounded-full " + urgencyDotColour(chip.Task.Urgency) }></span>
+						<span class="min-w-0 flex-1 truncate text-sm text-zinc-800 dark:text-zinc-200">{ chip.Task.Description }</span>
+					</button>
+				}
+			</div>
+		}
+	</div>
+}
+
 // calendarChip is the per-cell chip used in month + week. The Position field
 // shapes the rounded corners so a multi-day span reads as a continuous bar
 // across cells.
@@ -213,7 +292,8 @@ templ calendarChip(c CalendarChip) {
 		hx-target="#modal"
 		class={ calendarChipClass(c) }
 		title={ c.Task.Description }
+		data-chip-scroll
 	>
-		<span class="block truncate">{ c.Task.Description }</span>
+		<span class="block whitespace-nowrap" data-chip-text>{ c.Task.Description }</span>
 	</button>
 }

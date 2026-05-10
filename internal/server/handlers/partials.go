@@ -3,6 +3,7 @@ package handlers
 import (
 	"net/http"
 	"strings"
+	"time"
 
 	"github.com/furan917/taskwarrior-web/internal/tw"
 	"github.com/furan917/taskwarrior-web/internal/views"
@@ -10,30 +11,45 @@ import (
 
 // Partial serves /partials/list?report=<name> or /partials/list?project=<name>.
 // Optional &q=<text> performs a case-insensitive substring filter against
-// description, project, and tags. Optional &sort=<key>[:<dir>] reorders the
-// list - see views.ParseSort for the accepted shape. Returns ONLY the <ul>
-// fragment (plus the sort header) for HTMX swap into the polling container.
+// description, project, and tags. Optional &filter=<expr> passes a raw
+// Taskwarrior filter expression to `task export` (ANDed with the view filter
+// and the active context). Optional &sort=<key>[:<dir>] reorders the list —
+// see views.ParseSort for the accepted shape. Returns ONLY the <ul> fragment
+// (plus the sort header) for HTMX swap into the polling container.
 func (v *Views) Partial(w http.ResponseWriter, r *http.Request) {
 	q := r.URL.Query()
 	report := q.Get("report")
 	project := q.Get("project")
 	search := strings.TrimSpace(q.Get("q"))
+	userFilt := tw.SanitizeUserFilter(q.Get("filter"))
 	sortSpec := views.ParseSort(q)
 
-	var filter string
+	var viewFilter string
 	switch {
 	case project != "":
 		if !tw.ProjectPattern.MatchString(project) {
 			http.Error(w, "invalid project", http.StatusBadRequest)
 			return
 		}
-		filter = "project:" + project
+		viewFilter = "project:" + project
 	case report != "":
 		// Reports come in two flavours: the curated four (next/ready/agenda/
 		// forecast) handled by specForReport, and the dynamic set (built-in
 		// shortlist + user-defined taskrc reports) routed through
 		// dynamicReportSpec. The polling endpoint must accept both or the
 		// /r/{name} pages 400 every 30s.
+		//
+		// Synthetic "tag-<name>" slugs are used by the /tag/{name} drilldown;
+		// handle them before the report lookup so tag pages poll correctly.
+		if strings.HasPrefix(report, "tag-") {
+			tagName := strings.TrimPrefix(report, "tag-")
+			if !tw.TagPattern.MatchString(tagName) {
+				http.Error(w, "invalid tag name", http.StatusBadRequest)
+				return
+			}
+			viewFilter = "(status:pending or status:waiting) +" + tagName
+			break
+		}
 		if !tw.ReportNamePattern.MatchString(report) {
 			http.Error(w, "invalid report name", http.StatusBadRequest)
 			return
@@ -46,15 +62,15 @@ func (v *Views) Partial(w http.ResponseWriter, r *http.Request) {
 			http.Error(w, "unknown report", http.StatusBadRequest)
 			return
 		}
-		filter = spec.filter
+		viewFilter = spec.filter
 	default:
 		http.Error(w, "report or project required", http.StatusBadRequest)
 		return
 	}
 
-	tasks, err := v.fetch(r, filter)
+	tasks, err := v.fetch(r, viewFilter, userFilt)
 	if err != nil {
-		v.Logger.Error("partial fetch failed", "filter", filter, "err", err)
+		v.Logger.Error("partial fetch failed", "filter", viewFilter, "err", err)
 		http.Error(w, "fetch failed", http.StatusInternalServerError)
 		return
 	}
@@ -69,7 +85,17 @@ func (v *Views) Partial(w http.ResponseWriter, r *http.Request) {
 	// results" copy. Read fresh per request - the user could have flipped
 	// the context out-of-band since the last full-page render.
 	active := activeContext(v.TW, r)
-	renderHTML(w, r, "Partial", views.TaskListFragment(report, project, search, tasks, sortSpec, active), v.Logger)
+	renderHTML(w, r, "Partial", views.TaskListFragment(report, project, search, userFilt, tasks, sortSpec, active), v.Logger)
+}
+
+// ActiveIndicator serves GET /partials/active-indicator. Returns the nav chip
+// content (count + dropdown of active task names) or empty HTML when no tasks
+// are currently active. Errors return empty rather than a nav error — a broken
+// active-task indicator is less disruptive than a visible error in the header.
+func (v *Views) ActiveIndicator(w http.ResponseWriter, r *http.Request) {
+	tasks, _ := v.exportWithContext(r, "+ACTIVE")
+	w.Header().Set("Cache-Control", "no-store")
+	renderHTML(w, r, "ActiveIndicator", views.ActiveIndicatorContent(tasks, time.Now()), v.Logger)
 }
 
 // filterTasks returns the subset of tasks whose description, project, or any

@@ -1,44 +1,160 @@
 package views
 
+// navTopLinks is the single source of truth for primary nav destinations.
+// Both the desktop bar and the mobile drawer range over this; add a page once here.
+var navTopLinks = []struct {
+	Href  string
+	Label string
+	Key   string
+}{
+	{"/ready", "Ready", "ready"},
+	{"/next", "Next", "next"},
+	{"/agenda", "Agenda", "agenda"},
+	{"/calendar", "Calendar", "calendar"},
+	{"/browse", "Browse", "browse"},
+	{"/stats", "Stats", "stats"},
+}
+
 templ Nav(active, activeContext string, contexts []NamedContext, builtinReports, customReports []string) {
-	<nav class="mb-6 flex items-center gap-1 border-b border-zinc-200 pb-3 dark:border-zinc-800">
-		@navLink("/ready", "Ready", active == "ready")
-		@navLink("/next", "Next", active == "next")
-		@navLink("/agenda", "Agenda", active == "agenda")
-		@navLink("/calendar", "Calendar", active == "calendar")
-		@navLink("/browse", "Browse", active == "browse")
-		@navLink("/stats", "Stats", active == "stats")
-		@moreMenu(active, builtinReports, customReports)
-		<span class="ml-auto flex items-center gap-2">
-			@contextPill(activeContext, contexts)
+	<nav class="mb-6 border-b border-zinc-200 pb-3 dark:border-zinc-800">
+		<div class="flex items-center gap-2">
+			// Hamburger – mobile only
 			<button
 				type="button"
-				hx-post="/undo"
-				hx-confirm="Undo the last change?"
-				hx-swap="none"
-				class="rounded border border-zinc-300 px-3 py-1.5 text-sm font-medium text-zinc-700 hover:bg-zinc-100 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:ring-offset-2 dark:border-zinc-600 dark:text-zinc-300 dark:hover:bg-zinc-800 dark:focus:ring-offset-zinc-950"
-				title="Undo last change"
-				aria-label="Undo"
+				id="mobile-nav-open"
+				class="inline-flex h-8 w-8 shrink-0 items-center justify-center rounded text-zinc-500 hover:bg-zinc-100 hover:text-zinc-900 focus:outline-none focus:ring-2 focus:ring-blue-500 sm:hidden dark:text-zinc-400 dark:hover:bg-zinc-800 dark:hover:text-zinc-100"
+				aria-label="Open navigation"
+				aria-controls="mobile-nav-drawer"
+				aria-expanded="false"
 			>
-				Undo
+				<svg class="h-5 w-5" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" viewBox="0 0 24 24" aria-hidden="true">
+					<line x1="3" y1="6" x2="21" y2="6"></line>
+					<line x1="3" y1="12" x2="21" y2="12"></line>
+					<line x1="3" y1="18" x2="21" y2="18"></line>
+				</svg>
 			</button>
-			<button
-				type="button"
-				hx-get="/forms/add"
-				hx-target="#modal"
-				class="rounded bg-blue-600 px-3 py-1.5 text-sm font-medium text-white shadow-sm hover:bg-blue-700 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:ring-offset-2 dark:focus:ring-offset-zinc-950"
-			>
-				+ Add Task
-			</button>
-		</span>
+			// Desktop links – hidden on mobile
+			<div class="hidden items-center gap-1 sm:flex">
+				for _, l := range navTopLinks {
+					@navLink(l.Href, l.Label, active == l.Key)
+				}
+				@moreMenu(active, builtinReports, customReports)
+			</div>
+			// Right actions – always visible. Active indicator is last so it sits at
+			// the far-right edge; its dropdown uses right-0 which only works correctly
+			// when the trigger is flush with the viewport's right boundary.
+			<div class="ml-auto flex shrink-0 items-center gap-2 pr-0.5 sm:pr-0">
+				@contextPill(activeContext, contexts)
+				<button
+					type="button"
+					hx-post="/undo"
+					hx-confirm="Undo the last change?"
+					hx-swap="none"
+					class="rounded border border-zinc-300 px-3 py-1.5 text-sm font-medium text-zinc-700 hover:bg-zinc-100 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:ring-offset-2 dark:border-zinc-600 dark:text-zinc-300 dark:hover:bg-zinc-800 dark:focus:ring-offset-zinc-950"
+					title="Undo last change"
+					aria-label="Undo"
+				>
+					Undo
+				</button>
+				<button
+					type="button"
+					hx-get="/forms/add"
+					hx-target="#modal"
+					class="rounded bg-blue-600 px-3 py-1.5 text-sm font-medium text-white shadow-sm hover:bg-blue-700 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:ring-offset-2 dark:focus:ring-offset-zinc-950"
+				>
+					+ Add Task
+				</button>
+				<div
+					id="active-indicator"
+					hx-get="/partials/active-indicator"
+					hx-trigger="load, every 30s, refresh from:body"
+					hx-swap="innerHTML"
+				></div>
+			</div>
+		</div>
 	</nav>
+	@mobileNavDrawer(active, builtinReports, customReports)
+}
+
+// mobileNavDrawer is the slide-out panel for mobile. It reuses navTopLinks plus
+// the same More-menu sections (flat, no nested dropdown) so there is one list
+// of destinations to maintain.
+templ mobileNavDrawer(active string, builtinReports, customReports []string) {
+	<div id="mobile-nav-drawer" class="fixed inset-0 z-50" aria-hidden="true" hidden>
+		// Backdrop
+		<div id="mobile-nav-backdrop" class="absolute inset-0 bg-black/50"></div>
+		// Panel
+		<div data-drawer-panel class="absolute inset-y-0 left-0 flex w-72 max-w-[85vw] flex-col bg-white shadow-xl dark:bg-zinc-900">
+			<div class="flex items-center justify-between border-b border-zinc-200 px-4 py-3 dark:border-zinc-800">
+				<span class="text-sm font-semibold text-zinc-900 dark:text-zinc-100">Menu</span>
+				<button
+					type="button"
+					id="mobile-nav-close"
+					class="inline-flex h-7 w-7 items-center justify-center rounded text-zinc-400 hover:bg-zinc-100 hover:text-zinc-900 focus:outline-none focus:ring-2 focus:ring-blue-500 dark:hover:bg-zinc-800 dark:hover:text-zinc-100"
+					aria-label="Close navigation"
+				>
+					<svg class="h-4 w-4" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" viewBox="0 0 24 24" aria-hidden="true">
+						<line x1="18" y1="6" x2="6" y2="18"></line>
+						<line x1="6" y1="6" x2="18" y2="18"></line>
+					</svg>
+				</button>
+			</div>
+			<div class="flex-1 overflow-y-auto px-3 py-3">
+				<div class="space-y-0.5">
+					for _, l := range navTopLinks {
+						@drawerNavLink(l.Href, l.Label, active == l.Key)
+					}
+				</div>
+				<div class="mt-3 border-t border-zinc-200 pt-3 dark:border-zinc-800">
+					@drawerSectionLabel("Lookups")
+					<div class="space-y-0.5">
+						@drawerNavLink("/forecast", "Forecast", active == "forecast")
+						@drawerNavLink("/timesheet", "Timesheet", active == "timesheet")
+						@drawerNavLink("/done", "Done", active == "done")
+					</div>
+				</div>
+				if len(builtinReports) > 0 {
+					<div class="mt-3 border-t border-zinc-200 pt-3 dark:border-zinc-800">
+						@drawerSectionLabel("Built-in")
+						<div class="space-y-0.5">
+							for _, name := range builtinReports {
+								@drawerNavLink("/r/"+name, reportDisplayLabel(name), active == "r-"+name)
+							}
+						</div>
+					</div>
+				}
+				if len(customReports) > 0 {
+					<div class="mt-3 border-t border-zinc-200 pt-3 dark:border-zinc-800">
+						@drawerSectionLabel("Custom")
+						<div class="space-y-0.5">
+							for _, name := range customReports {
+								@drawerNavLink("/r/"+name, reportDisplayLabel(name), active == "r-"+name)
+							}
+						</div>
+					</div>
+				}
+			</div>
+		</div>
+	</div>
+}
+
+templ drawerNavLink(href, label string, active bool) {
+	if active {
+		<a href={ templ.SafeURL(href) } class="flex items-center rounded-md bg-zinc-900 px-3 py-2 text-sm font-medium text-white dark:bg-zinc-100 dark:text-zinc-900">{ label }</a>
+	} else {
+		<a href={ templ.SafeURL(href) } class="flex items-center rounded-md px-3 py-2 text-sm font-medium text-zinc-700 hover:bg-zinc-100 dark:text-zinc-200 dark:hover:bg-zinc-800">{ label }</a>
+	}
+}
+
+templ drawerSectionLabel(label string) {
+	<div class="mb-1 px-3 text-[10px] font-semibold uppercase tracking-wider text-zinc-400 dark:text-zinc-500">{ label }</div>
 }
 
 templ navLink(href, label string, active bool) {
 	if active {
-		<a href={ templ.SafeURL(href) } class="rounded bg-zinc-900 px-3 py-1.5 text-sm font-medium text-white dark:bg-zinc-100 dark:text-zinc-900">{ label }</a>
+		<a href={ templ.SafeURL(href) } class="shrink-0 rounded bg-zinc-900 px-3 py-1.5 text-sm font-medium text-white dark:bg-zinc-100 dark:text-zinc-900">{ label }</a>
 	} else {
-		<a href={ templ.SafeURL(href) } class="rounded px-3 py-1.5 text-sm font-medium text-zinc-600 hover:bg-zinc-100 dark:text-zinc-300 dark:hover:bg-zinc-800">{ label }</a>
+		<a href={ templ.SafeURL(href) } class="shrink-0 rounded px-3 py-1.5 text-sm font-medium text-zinc-600 hover:bg-zinc-100 dark:text-zinc-300 dark:hover:bg-zinc-800">{ label }</a>
 	}
 }
 
@@ -50,7 +166,7 @@ templ navLink(href, label string, active bool) {
 // Open state is driven by the same generic [data-popover-wrap] / data-open
 // machinery that powers the context pill (see web/static/js/context_pill.js).
 templ moreMenu(active string, builtinReports, customReports []string) {
-	<span class="relative inline-flex" data-popover-wrap>
+	<span class="relative inline-flex shrink-0" data-popover-wrap>
 		<button
 			type="button"
 			class={ moreTriggerClass(moreActive(active)) }
@@ -69,6 +185,7 @@ templ moreMenu(active string, builtinReports, customReports []string) {
 			<div class="max-h-96 overflow-y-auto py-1 text-sm">
 				@moreSectionHeader("Lookups")
 				@moreMenuLink("/forecast", "Forecast", active == "forecast")
+				@moreMenuLink("/timesheet", "Timesheet", active == "timesheet")
 				@moreMenuLink("/done", "Done", active == "done")
 				if len(builtinReports) > 0 {
 					@moreSectionHeader("Built-in")
@@ -91,7 +208,7 @@ templ moreMenu(active string, builtinReports, customReports []string) {
 // the dropdown matches the current page. This mirrors the navLink active
 // state so users always see "you are inside this menu".
 func moreActive(active string) bool {
-	if active == "forecast" || active == "done" {
+	if active == "forecast" || active == "done" || active == "timesheet" {
 		return true
 	}
 	if len(active) > 2 && active[:2] == "r-" {
@@ -102,9 +219,9 @@ func moreActive(active string) bool {
 
 func moreTriggerClass(active bool) string {
 	if active {
-		return "inline-flex items-center gap-1 rounded bg-zinc-900 px-3 py-1.5 text-sm font-medium text-white dark:bg-zinc-100 dark:text-zinc-900"
+		return "shrink-0 inline-flex items-center gap-1 rounded bg-zinc-900 px-3 py-1.5 text-sm font-medium text-white dark:bg-zinc-100 dark:text-zinc-900"
 	}
-	return "inline-flex items-center gap-1 rounded px-3 py-1.5 text-sm font-medium text-zinc-600 hover:bg-zinc-100 dark:text-zinc-300 dark:hover:bg-zinc-800"
+	return "shrink-0 inline-flex items-center gap-1 rounded px-3 py-1.5 text-sm font-medium text-zinc-600 hover:bg-zinc-100 dark:text-zinc-300 dark:hover:bg-zinc-800"
 }
 
 templ moreSectionHeader(label string) {
@@ -209,7 +326,7 @@ templ contextPillInactive() {
 // co-located and the JS can treat them as one unit.
 templ contextDropdown(activeContext string, contexts []NamedContext) {
 	<div
-		class="absolute right-0 top-full z-30 mt-1 hidden min-w-44 rounded-md border border-zinc-200 bg-white shadow-lg dark:border-zinc-700 dark:bg-zinc-900"
+		class="absolute left-0 top-full z-30 mt-1 hidden min-w-44 rounded-md border border-zinc-200 bg-white shadow-lg sm:left-auto sm:right-0 dark:border-zinc-700 dark:bg-zinc-900"
 		role="menu"
 		data-popover-menu
 	>

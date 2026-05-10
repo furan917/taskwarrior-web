@@ -47,6 +47,7 @@ func registerRoutes(mux *http.ServeMux, cfg Config) {
 	app.HandleFunc("GET /browse", v.Labels)
 	app.HandleFunc("GET /calendar", v.Calendar)
 	app.HandleFunc("GET /partials/list", v.Partial)
+	app.HandleFunc("GET /partials/active-indicator", v.ActiveIndicator)
 
 	app.HandleFunc("GET /forms/add", f.Add)
 	app.HandleFunc("GET /forms/edit/{id}", f.Edit)
@@ -64,6 +65,8 @@ func registerRoutes(mux *http.ServeMux, cfg Config) {
 	app.HandleFunc("POST /tasks/{id}/denotate", t.Denotate)
 	app.HandleFunc("GET /done", v.Done)
 	app.HandleFunc("GET /stats", v.Stats)
+	app.HandleFunc("GET /timesheet", v.Timesheet)
+	app.HandleFunc("POST /timesheet/enable-tracking", v.EnableTimeTracking)
 	app.HandleFunc("POST /undo", t.Undo)
 	app.HandleFunc("POST /context", c.Set)
 

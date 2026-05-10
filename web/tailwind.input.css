@@ -42,6 +42,24 @@
  *   - .row-focused: ~line 32 (FOCUS_CLASS injection)
  *   - .context-pill open rule: ~line 481 (context-wrap CSS injection)
  */
+@keyframes drawer-slide-in {
+  from { transform: translateX(-100%); }
+  to   { transform: translateX(0); }
+}
+
+@layer utilities {
+  [data-drawer-panel] {
+    animation: drawer-slide-in 220ms ease;
+  }
+  .scrollbar-none {
+    scrollbar-width: none;
+    -ms-overflow-style: none;
+  }
+  .scrollbar-none::-webkit-scrollbar {
+    display: none;
+  }
+}
+
 @layer components {
   .row-focused {
     outline: 2px solid #3b82f6;
