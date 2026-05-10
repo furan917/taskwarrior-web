@@ -304,6 +304,18 @@ Highlight clears on the first `input` event so it doesn't feel sticky once the u
 
 Validation errors are typed (`*tw.ValidationError{Field, Value, Reason}`) so the field classifier uses `errors.As` rather than parsing message text - renaming a message can't silently break the highlight.
 
+## Recurrence
+
+The add/edit modal carries first-class **Recur** and **Until** inputs alongside the date fields. Recur accepts the full Taskwarrior duration vocabulary (keywords like `weekly` / `monthly` / `quarterly`, durations like `1d` / `2w` / `1mo`, ISO 8601 like `P7D` / `P1M`); Until accepts the same syntax as Due / Wait / Scheduled. A `?` disclosure on each field lists the accepted forms; below each input, click-to-fill chips offer the common cases (`weekly`, `biweekly`, `monthly`, `quarterly`, `annually` for Recur; `+3mo`, `+6mo`, `+1y`, `eoy` for Until). Empty submission on edit clears the field.
+
+When you open the modal on a recurring **child** instance, both fields are rendered read-only with a hint pointing at the parent template (find it under More ▾ Built-in ▾ Recurring) - Taskwarrior accepts edits to the schedule on the child but they don't take effect, so the form mirrors the actual semantics rather than the surface API. Editing the parent's Recur / Until propagates to all future instances on the next `task` refresh.
+
+Deleting a `status:recurring` parent cascades to its `status:pending` children (`parent:<uuid> status:pending delete`) so the modal's Delete button on a recurring template doesn't leave orphan instances behind. The styled confirmation dialog explains the cascade before you commit.
+
+## Duplicate
+
+The edit modal carries a **Duplicate** action in its overflow (kebab) menu, hitting `POST /tasks/{id}/duplicate` (which shells `task <id> duplicate`). The clone copies description, project, tags, due / wait / scheduled, dependencies and UDAs as a fresh `status:pending` task; recurrence (`recur` / `until`) is intentionally **not** copied, so duplicating a recurring template gives you a one-off, not a second template - the button title says so when the source is recurring. A styled confirm appears first so the action isn't single-click destructive.
+
 ## Mark done from edit modal
 
 The edit modal carries a green **Mark done** button next to **Save** (with a styled confirmation), so completing a task from the calendar's chip-click flow doesn't need to drop back to the row's done circle. Same `/tasks/{id}/done` endpoint as the inline circle. The modal closes on success via a delegated `data-close-on-success` handler (replaces inline `hx-on::after-request` so CSP `unsafe-eval` stays a defence-in-depth signal rather than an active sink).
@@ -314,14 +326,18 @@ Typing a note in the **Add a note (or click Save to attach it)...** input then c
 
 If the modify lands but the annotation fails (very rare; only the second `task` call), the response is a soft warning ("Task saved, but the note couldn't be attached") rather than a 500 - the structured edits already persisted, no need to roll back.
 
+## Time tracking
+
+Each row carries a small play / stop button between the bulk-select checkbox and the description: a grey play triangle when the task is inactive (POSTs to `/tasks/{id}/start`, marking it `+ACTIVE`), an amber stop square when the task is currently being tracked (POSTs to `/tasks/{id}/stop`, clearing the `start` timestamp). The button is intentionally hidden on `status:recurring` parents - you can't track time on a template, only on its child instances. The same Start / Stop pair appears in the edit modal next to the Save row, so kicking off a session from the calendar's chip-click flow is one click.
+
+Active tasks render the `+ACTIVE` virtual tag in the row's chip strip and are surfaced as a count card on `/stats` ("Active N"). There's no nav-bar indicator across pages and no accumulated-time display per task; if you need cumulative time, use Taskwarrior's CLI reports (`task <id> info` shows the start, `task summary` shows aggregate).
+
 ## Known limitations
 
-- **No recurrence editing.** `recur:`, `until:` fields aren't surfaced in the form. To create a recurring task you'd shell `task add ... recur:weekly` from the CLI; the row UI does render the recurrence virtual tag if present, but you can't author it here yet.
-- **No start/stop time tracking.** `task <id> start` / `stop` and `+ACTIVE` aren't surfaced. Less critical for non-billable workflows, but the active-task indicator is useful for "what was I in the middle of yesterday."
-- **No task duplicate.** No "create similar task" button (`task <id> duplicate`).
 - **No SSE.** Polling at 30s only.
 - **No drag/drop reordering.** Sort is via column headers, not by hand.
 - **Search is substring-only.** No way to compose `priority:H and project:hiring` ad-hoc through the search box; use a context or a defined report.
+- **No nav-level active timer indicator.** Per-row start/stop works, but there's no persistent "task X is running" pill on the header to remind you across page navigations.
 
 ## Where things live
 
