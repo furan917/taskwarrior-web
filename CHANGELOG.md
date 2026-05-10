@@ -1,5 +1,12 @@
 # Changelog
 
+## [1.2.0](https://github.com/furan917/taskwarrior-web/compare/v1.1.0...v1.2.0) (2026-05-10)
+
+
+### Features
+
+* add context CRUD + browse project tree ([db036b5](https://github.com/furan917/taskwarrior-web/commit/db036b547011cffafbe201cdcf73808e931b8789))
+
 ## [1.1.0](https://github.com/furan917/taskwarrior-web/compare/v1.0.1...v1.1.0) (2026-05-10)
 
 
