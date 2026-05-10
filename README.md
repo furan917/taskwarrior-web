@@ -4,6 +4,16 @@ Local-only web UI for Taskwarrior 3.x. Single Go binary, served on `127.0.0.1:50
 
 <video src="https://github.com/user-attachments/assets/fcc79f49-cf27-44f2-9590-a5776a35d5e5" autoplay loop muted playsinline width="800"></video>
 
+## Install from a release
+
+No Go toolchain needed. Detects your OS and architecture, downloads the right binary, and installs it as a user service:
+
+```sh
+curl -fsSL https://raw.githubusercontent.com/furan917/taskwarrior-web/main/scripts/get.sh | sh
+```
+
+Supports macOS (Intel + Apple Silicon) and Linux (amd64 + arm64). Requires `task` to already be on `$PATH`.
+
 ## Stack
 
 - Go 1.25 stdlib `net/http` (pattern routing, no router framework).
