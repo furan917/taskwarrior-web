@@ -78,6 +78,12 @@ type ttlCache[T any] struct {
 	fetched bool
 }
 
+func (c *ttlCache[T]) invalidate() {
+	c.mu.Lock()
+	c.expiry = time.Time{} // zero is always Before any real time, forcing a re-fetch
+	c.mu.Unlock()
+}
+
 func (c *ttlCache[T]) load(ctx context.Context, fetch func(context.Context) (T, error)) T {
 	c.mu.Lock()
 	defer c.mu.Unlock()

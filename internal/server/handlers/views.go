@@ -98,7 +98,7 @@ func (v *Views) specForReport(name string) (reportSpec, bool) {
 // it here ensures it still surfaces in the More dropdown alongside its
 // peers. customReports() dedupes against curatedReportSpecs so it never
 // ends up in the Custom section.
-var builtinReportNames = []string{"blocked", "overdue", "waiting", "recurring", "active"}
+var builtinReportNames = []string{"active", "blocked", "overdue", "recurring", "waiting"}
 
 // isBuiltinReport reports whether name is in the curated TW built-in set.
 // Used both to admit /r/<name> routes for built-ins and to exclude them
@@ -223,8 +223,9 @@ func (v *Views) Labels(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 	page := v.buildPage(r, "Browse", "browse", false)
+	roots := views.BuildProjectTree(sortedCounted(projectCounts))
 	renderHTML(w, r, "Labels",
-		views.LabelsPage(page, sortedCounted(projectCounts), sortedCounted(tagCounts)),
+		views.LabelsPage(page, roots, sortedCounted(tagCounts)),
 		v.Logger)
 }
 

@@ -69,6 +69,12 @@ func registerRoutes(mux *http.ServeMux, cfg Config) {
 	app.HandleFunc("POST /timesheet/enable-tracking", v.EnableTimeTracking)
 	app.HandleFunc("POST /undo", t.Undo)
 	app.HandleFunc("POST /context", c.Set)
+	app.HandleFunc("GET /contexts", c.ManageContexts)
+	app.HandleFunc("GET /forms/context/new", c.CreateContextForm)
+	app.HandleFunc("GET /forms/context/{name}", c.EditContextForm)
+	app.HandleFunc("POST /contexts", c.CreateContext)
+	app.HandleFunc("PUT /contexts/{name}", c.UpdateContext)
+	app.HandleFunc("DELETE /contexts/{name}", c.DeleteContext)
 
 	mux.Handle("/", withCSRF(cfg.Logger, app))
 }

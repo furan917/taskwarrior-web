@@ -2,8 +2,10 @@ package handlers
 
 import (
 	"context"
+	"errors"
 	"log/slog"
 	"net/http"
+	"strings"
 
 	"github.com/furan917/taskwarrior-web/internal/config"
 	"github.com/furan917/taskwarrior-web/internal/tw"
@@ -77,4 +79,140 @@ func (c *Contexts) Set(w http.ResponseWriter, r *http.Request) {
 	// the nav stale.
 	w.Header().Set("HX-Refresh", "true")
 	w.WriteHeader(http.StatusNoContent)
+}
+
+// ManageContexts handles GET /contexts — lists all defined contexts with edit/delete actions.
+func (c *Contexts) ManageContexts(w http.ResponseWriter, r *http.Request) {
+	contexts := c.TW.ContextsCached(r.Context())
+	active := activeContext(c.TW, r)
+	page := buildContextPage(c.TW, r, "Contexts", "contexts")
+	renderHTML(w, r, "Contexts", views.ManageContextsPage(page, contexts, active), c.Logger)
+}
+
+// CreateContextForm handles GET /forms/context/new — renders the empty create modal.
+func (c *Contexts) CreateContextForm(w http.ResponseWriter, r *http.Request) {
+	csrf := csrfToken(r)
+	renderHTML(w, r, "ContextForm", views.ContextFormModal(csrf, "", "", "", true), c.Logger)
+}
+
+// EditContextForm handles GET /forms/context/{name} — renders the pre-filled edit modal.
+func (c *Contexts) EditContextForm(w http.ResponseWriter, r *http.Request) {
+	name := r.PathValue("name")
+	if !tw.ContextNamePattern.MatchString(name) {
+		http.Error(w, "invalid context name", http.StatusBadRequest)
+		return
+	}
+	var found tw.Context
+	for _, c2 := range c.TW.ContextsCached(r.Context()) {
+		if c2.Name == name {
+			found = c2
+			break
+		}
+	}
+	csrf := csrfToken(r)
+	renderHTML(w, r, "ContextForm", views.ContextFormModal(csrf, found.Name, found.ReadFilter, found.WriteFilter, false), c.Logger)
+}
+
+// CreateContext handles POST /contexts — creates a new context.
+func (c *Contexts) CreateContext(w http.ResponseWriter, r *http.Request) {
+	name, readFilter, writeFilter, ok := parseContextForm(w, r)
+	if !ok {
+		return
+	}
+	if err := c.TW.DefineContext(r.Context(), name, readFilter); err != nil {
+		c.contextFormError(w, err)
+		return
+	}
+	if writeFilter != "" {
+		if err := c.TW.SetContextWriteFilter(r.Context(), name, writeFilter); err != nil {
+			c.contextFormError(w, err)
+			return
+		}
+	}
+	w.Header().Set("HX-Refresh", "true")
+	w.WriteHeader(http.StatusNoContent)
+}
+
+// UpdateContext handles PUT /contexts/{name} — updates (and optionally renames) a context.
+func (c *Contexts) UpdateContext(w http.ResponseWriter, r *http.Request) {
+	oldName := r.PathValue("name")
+	if !tw.ContextNamePattern.MatchString(oldName) {
+		http.Error(w, "invalid context name", http.StatusBadRequest)
+		return
+	}
+	newName, readFilter, writeFilter, ok := parseContextForm(w, r)
+	if !ok {
+		return
+	}
+	if err := c.TW.RenameContext(r.Context(), oldName, newName, readFilter, writeFilter); err != nil {
+		c.contextFormError(w, err)
+		return
+	}
+	w.Header().Set("HX-Refresh", "true")
+	w.WriteHeader(http.StatusNoContent)
+}
+
+// DeleteContext handles DELETE /contexts/{name} — removes a context.
+func (c *Contexts) DeleteContext(w http.ResponseWriter, r *http.Request) {
+	name := r.PathValue("name")
+	if !tw.ContextNamePattern.MatchString(name) {
+		http.Error(w, "invalid context name", http.StatusBadRequest)
+		return
+	}
+	if err := c.TW.DeleteContext(r.Context(), name); err != nil {
+		c.Logger.Error("delete context failed", "name", name, "err", err)
+		http.Error(w, "delete context failed", http.StatusInternalServerError)
+		return
+	}
+	w.Header().Set("HX-Refresh", "true")
+	w.WriteHeader(http.StatusNoContent)
+}
+
+func parseContextForm(w http.ResponseWriter, r *http.Request) (name, readFilter, writeFilter string, ok bool) {
+	if err := r.ParseForm(); err != nil {
+		http.Error(w, "bad form", http.StatusBadRequest)
+		return "", "", "", false
+	}
+	name = strings.TrimSpace(r.FormValue("name"))
+	readFilter = strings.TrimSpace(r.FormValue("read_filter"))
+	writeFilter = strings.TrimSpace(r.FormValue("write_filter"))
+	if !tw.ContextNamePattern.MatchString(name) {
+		http.Error(w, "invalid context name — letters, digits, dash and underscore only", http.StatusBadRequest)
+		return "", "", "", false
+	}
+	if readFilter == "" {
+		http.Error(w, "read filter is required", http.StatusBadRequest)
+		return "", "", "", false
+	}
+	if tw.FilterContainsRcOverride(readFilter) {
+		http.Error(w, "read filter must not contain rc.* overrides", http.StatusBadRequest)
+		return "", "", "", false
+	}
+	if writeFilter != "" && tw.FilterContainsRcOverride(writeFilter) {
+		http.Error(w, "write filter must not contain rc.* overrides", http.StatusBadRequest)
+		return "", "", "", false
+	}
+	return name, readFilter, writeFilter, true
+}
+
+func (c *Contexts) contextFormError(w http.ResponseWriter, err error) {
+	c.Logger.Error("context operation failed", "err", err)
+	if errors.Is(err, tw.ErrInvalid) {
+		http.Error(w, err.Error(), http.StatusBadRequest)
+		return
+	}
+	http.Error(w, "operation failed", http.StatusInternalServerError)
+}
+
+// buildContextPage is a minimal page builder for the contexts handler which
+// doesn't have access to views.buildPage (that lives on Views).
+func buildContextPage(twc *tw.Client, r *http.Request, title, activeView string) views.Page {
+	active := activeContext(twc, r)
+	return views.Page{
+		Title:         title,
+		ActiveView:    activeView,
+		CSRFToken:     csrfToken(r),
+		ActiveContext: active,
+		Contexts:      namedContextsForRender(twc, r, active),
+	}
 }

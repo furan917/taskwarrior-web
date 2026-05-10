@@ -257,14 +257,15 @@ Taskwarrior contexts are persistent filters defined via the CLI; once active, ev
 
 Click the pill to open a dropdown listing every defined context (plus "(none)" at the top to clear). Picking an entry POSTs to `/context` and the server replies with `HX-Refresh: true`, reloading the page so the pill, the browser title hint (`Next [work] · taskwarrior-web`), the empty-state copy ("No tasks match in context 'work'.") and the Add Task modal all re-render against the new active state.
 
-Define / list / clear contexts with the CLI; this UI does not provide a manage screen by design:
+### Managing contexts
 
-```
-task context define work +work
-task context define home +home
-task context work       # activates "work" everywhere
-task context none       # clears
-```
+**More ▾ → Contexts** (or `/contexts`) opens the manage page listing every defined context with its read filter, write filter, and active status. From there:
+
+- **New context** — opens a modal with a Name field, a Read filter field (required; supports any Taskwarrior filter expression like `+work`, `project:acme`, `+team or project:team`), and an optional Write filter. Submits to `POST /contexts`.
+- **Edit** — pre-fills the same modal for an existing context. Renaming (changing the Name field) defines the new name and deletes the old one atomically. Submits to `PUT /contexts/{name}`.
+- **Delete** — removes the context with a confirmation prompt. `DELETE /contexts/{name}`.
+
+After any mutation the context cache is invalidated immediately so the pill dropdown reflects the new state without waiting for the 60s TTL.
 
 Pill colour is hashed from the context name into an 18-slot palette (six base hues - blue, teal, purple, amber, orange, pink - times three rounds: base, lighter, darker), so the same context always gets the same hue across reloads. Red is reserved for urgency-critical signals elsewhere and never used for contexts. Yellow is always paired with dark text to meet WCAG AA.
 
@@ -278,7 +279,7 @@ The Add Task modal carries its own context dropdown in the header, defaulting to
 
 The prefill is derived from each context's read filter via `views.ContextPrefill`: first lowercase `+tag` wins, otherwise first `project:value` wins, ALL-UPPERCASE virtual tags are skipped. For an OR-shaped filter like `+team or project:team or project:hiring`, the picker prefills `+team`.
 
-Note: Taskwarrior's per-context **write** filter is NOT applied automatically by the binary for OR-shaped filters - it gets confused and mangles the description. The form-level prefill is the only reliable way to keep new tasks consistent with the lens the user is working in. As a result we explicitly clear the write filter on every context defined via the UI (or you can do it manually with `task config context.<name>.write ""`).
+Note: Taskwarrior's per-context **write** filter is NOT applied automatically by the binary for OR-shaped filters — it gets confused and mangles the description. The form-level prefill is the only reliable way to keep new tasks consistent with the lens the user is working in.
 
 ## Dependencies
 

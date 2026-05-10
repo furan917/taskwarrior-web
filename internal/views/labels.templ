@@ -9,17 +9,28 @@ type Counted struct {
 	Count int
 }
 
-templ LabelsPage(p Page, projects, tags []Counted) {
+templ LabelsPage(p Page, projects []ProjectTreeNode, tags []Counted) {
 	@Layout(p) {
 		<div class="mb-3 flex items-baseline justify-between">
 			<h2 class="text-lg font-medium">Browse</h2>
 			<span class="text-xs text-zinc-500 dark:text-zinc-400">open work only</span>
 		</div>
 		<section class="grid gap-6 md:grid-cols-2">
-			@labelColumn("Projects", "project", projects)
+			@projectTreeColumn(projects)
 			@labelColumn("Tags", "tag", tags)
 		</section>
 	}
+}
+
+templ projectTreeColumn(roots []ProjectTreeNode) {
+	<div>
+		<h3 class="mb-2 text-sm font-semibold uppercase tracking-wide text-zinc-500 dark:text-zinc-400">Projects</h3>
+		if len(roots) == 0 {
+			<p class={ EmptyCardClass() + " p-4 text-sm text-zinc-500 dark:text-zinc-400" }>No Projects in use.</p>
+		} else {
+			@ProjectTree(roots)
+		}
+	</div>
 }
 
 templ labelColumn(title, kind string, items []Counted) {

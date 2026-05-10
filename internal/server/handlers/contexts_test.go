@@ -12,6 +12,267 @@ import (
 	"github.com/furan917/taskwarrior-web/internal/tw"
 )
 
+// --- CRUD handler tests ---
+
+func TestContexts_CreateContext_HappyPath(t *testing.T) {
+	logDir := installFakeTaskWith(t, fakeTaskOpts{RecordArgv: true})
+	c := newContexts()
+
+	form := url.Values{"name": {"myctx"}, "read_filter": {"+myctx"}, "write_filter": {""}}
+	req := httptest.NewRequest(http.MethodPost, "/contexts", strings.NewReader(form.Encode()))
+	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+	rr := httptest.NewRecorder()
+	c.CreateContext(rr, req)
+
+	if rr.Code != http.StatusNoContent {
+		t.Fatalf("status: got %d want 204; body=%s", rr.Code, rr.Body.String())
+	}
+	if got := rr.Header().Get("HX-Refresh"); got != "true" {
+		t.Errorf("HX-Refresh: got %q want true", got)
+	}
+	// Verify a "define" invocation with the name and filter reached the binary.
+	entries, _ := os.ReadDir(logDir)
+	found := false
+	for _, e := range entries {
+		data, _ := os.ReadFile(filepath.Join(logDir, e.Name()))
+		joined := strings.Join(strings.Fields(string(data)), " ")
+		if strings.Contains(joined, "define") && strings.Contains(joined, "myctx") {
+			found = true
+		}
+	}
+	if !found {
+		t.Error("no 'context define myctx' invocation recorded")
+	}
+}
+
+func TestContexts_CreateContext_RejectsBadName(t *testing.T) {
+	installFakeTaskWith(t, fakeTaskOpts{})
+	c := newContexts()
+
+	for _, bad := range []string{"bad name", "+evil", "a;b", "rc.foo=bar"} {
+		form := url.Values{"name": {bad}, "read_filter": {"+work"}}
+		req := httptest.NewRequest(http.MethodPost, "/contexts", strings.NewReader(form.Encode()))
+		req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+		rr := httptest.NewRecorder()
+		c.CreateContext(rr, req)
+		if rr.Code != http.StatusBadRequest {
+			t.Errorf("name %q: got %d want 400", bad, rr.Code)
+		}
+	}
+}
+
+func TestContexts_CreateContext_RejectsRcOverrideInFilter(t *testing.T) {
+	installFakeTaskWith(t, fakeTaskOpts{})
+	c := newContexts()
+
+	form := url.Values{"name": {"work"}, "read_filter": {"rc.data.location=/tmp/evil"}}
+	req := httptest.NewRequest(http.MethodPost, "/contexts", strings.NewReader(form.Encode()))
+	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+	rr := httptest.NewRecorder()
+	c.CreateContext(rr, req)
+
+	if rr.Code != http.StatusBadRequest {
+		t.Errorf("rc.* filter: got %d want 400", rr.Code)
+	}
+}
+
+func TestContexts_CreateContext_RequiresReadFilter(t *testing.T) {
+	installFakeTaskWith(t, fakeTaskOpts{})
+	c := newContexts()
+
+	form := url.Values{"name": {"work"}, "read_filter": {""}}
+	req := httptest.NewRequest(http.MethodPost, "/contexts", strings.NewReader(form.Encode()))
+	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+	rr := httptest.NewRecorder()
+	c.CreateContext(rr, req)
+
+	if rr.Code != http.StatusBadRequest {
+		t.Errorf("empty read filter: got %d want 400", rr.Code)
+	}
+}
+
+func TestContexts_UpdateContext_HappyPath(t *testing.T) {
+	logDir := installFakeTaskWith(t, fakeTaskOpts{RecordArgv: true})
+	c := newContexts()
+
+	form := url.Values{"name": {"work"}, "read_filter": {"+work"}, "write_filter": {""}}
+	req := httptest.NewRequest(http.MethodPut, "/contexts/work", strings.NewReader(form.Encode()))
+	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+	// Simulate path value from ServeMux.
+	req.SetPathValue("name", "work")
+	rr := httptest.NewRecorder()
+	c.UpdateContext(rr, req)
+
+	if rr.Code != http.StatusNoContent {
+		t.Fatalf("status: got %d want 204; body=%s", rr.Code, rr.Body.String())
+	}
+	if rr.Header().Get("HX-Refresh") != "true" {
+		t.Error("HX-Refresh not set")
+	}
+	entries, _ := os.ReadDir(logDir)
+	found := false
+	for _, e := range entries {
+		data, _ := os.ReadFile(filepath.Join(logDir, e.Name()))
+		joined := strings.Join(strings.Fields(string(data)), " ")
+		if strings.Contains(joined, "define") && strings.Contains(joined, "work") {
+			found = true
+		}
+	}
+	if !found {
+		t.Error("no 'define work' invocation recorded")
+	}
+}
+
+func TestContexts_UpdateContext_RejectsBadOldName(t *testing.T) {
+	installFakeTaskWith(t, fakeTaskOpts{})
+	c := newContexts()
+
+	form := url.Values{"name": {"work"}, "read_filter": {"+work"}}
+	req := httptest.NewRequest(http.MethodPut, "/contexts/bad+name", strings.NewReader(form.Encode()))
+	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+	req.SetPathValue("name", "bad+name")
+	rr := httptest.NewRecorder()
+	c.UpdateContext(rr, req)
+
+	if rr.Code != http.StatusBadRequest {
+		t.Errorf("bad path name: got %d want 400", rr.Code)
+	}
+}
+
+func TestContexts_DeleteContext_HappyPath(t *testing.T) {
+	logDir := installFakeTaskWith(t, fakeTaskOpts{RecordArgv: true})
+	c := newContexts()
+
+	req := httptest.NewRequest(http.MethodDelete, "/contexts/work", nil)
+	req.SetPathValue("name", "work")
+	rr := httptest.NewRecorder()
+	c.DeleteContext(rr, req)
+
+	if rr.Code != http.StatusNoContent {
+		t.Fatalf("status: got %d want 204; body=%s", rr.Code, rr.Body.String())
+	}
+	if rr.Header().Get("HX-Refresh") != "true" {
+		t.Error("HX-Refresh not set")
+	}
+	entries, _ := os.ReadDir(logDir)
+	found := false
+	for _, e := range entries {
+		data, _ := os.ReadFile(filepath.Join(logDir, e.Name()))
+		joined := strings.Join(strings.Fields(string(data)), " ")
+		if strings.Contains(joined, "context") && strings.Contains(joined, "delete") && strings.Contains(joined, "work") {
+			found = true
+		}
+	}
+	if !found {
+		t.Error("no 'context delete work' invocation recorded")
+	}
+}
+
+func TestContexts_DeleteContext_RejectsBadName(t *testing.T) {
+	installFakeTaskWith(t, fakeTaskOpts{})
+	c := newContexts()
+
+	req := httptest.NewRequest(http.MethodDelete, "/contexts/bad+name", nil)
+	req.SetPathValue("name", "bad+name")
+	rr := httptest.NewRecorder()
+	c.DeleteContext(rr, req)
+
+	if rr.Code != http.StatusBadRequest {
+		t.Errorf("bad name: got %d want 400", rr.Code)
+	}
+}
+
+func TestContexts_DeleteContext_500WhenTaskFails(t *testing.T) {
+	installFailingTask(t)
+	c := newContexts()
+
+	req := httptest.NewRequest(http.MethodDelete, "/contexts/work", nil)
+	req.SetPathValue("name", "work")
+	rr := httptest.NewRecorder()
+	c.DeleteContext(rr, req)
+
+	if rr.Code != http.StatusInternalServerError {
+		t.Errorf("got %d want 500", rr.Code)
+	}
+}
+
+func TestContexts_ManageContexts_RendersPage(t *testing.T) {
+	installFakeTaskWith(t, fakeTaskOpts{
+		Contexts: []fakeContext{
+			{Name: "work", ReadFilter: "+work", Active: true},
+			{Name: "home", ReadFilter: "+home"},
+		},
+		ActiveContext: "work",
+	})
+	c := newContexts()
+
+	req := httptest.NewRequest(http.MethodGet, "/contexts", nil)
+	rr := httptest.NewRecorder()
+	c.ManageContexts(rr, req)
+
+	if rr.Code != http.StatusOK {
+		t.Fatalf("status: got %d; body=%s", rr.Code, rr.Body.String())
+	}
+	body := rr.Body.String()
+	if !strings.Contains(body, "work") {
+		t.Error("body missing context name 'work'")
+	}
+	if !strings.Contains(body, "home") {
+		t.Error("body missing context name 'home'")
+	}
+}
+
+func TestContexts_CreateContextForm_RendersModal(t *testing.T) {
+	installFakeTaskWith(t, fakeTaskOpts{})
+	c := newContexts()
+
+	req := httptest.NewRequest(http.MethodGet, "/forms/context/new", nil)
+	rr := httptest.NewRecorder()
+	c.CreateContextForm(rr, req)
+
+	if rr.Code != http.StatusOK {
+		t.Fatalf("status: got %d; body=%s", rr.Code, rr.Body.String())
+	}
+	// Form should target POST /contexts (create path).
+	if !strings.Contains(rr.Body.String(), "/contexts") {
+		t.Error("create form missing POST /contexts action")
+	}
+}
+
+func TestContexts_EditContextForm_PreFills(t *testing.T) {
+	installFakeTaskWith(t, fakeTaskOpts{
+		Contexts: []fakeContext{{Name: "work", ReadFilter: "+work"}},
+	})
+	c := newContexts()
+
+	req := httptest.NewRequest(http.MethodGet, "/forms/context/work", nil)
+	req.SetPathValue("name", "work")
+	rr := httptest.NewRecorder()
+	c.EditContextForm(rr, req)
+
+	if rr.Code != http.StatusOK {
+		t.Fatalf("status: got %d; body=%s", rr.Code, rr.Body.String())
+	}
+	body := rr.Body.String()
+	if !strings.Contains(body, "work") {
+		t.Error("edit form not pre-filled with context name")
+	}
+}
+
+func TestContexts_EditContextForm_RejectsBadName(t *testing.T) {
+	installFakeTaskWith(t, fakeTaskOpts{})
+	c := newContexts()
+
+	req := httptest.NewRequest(http.MethodGet, "/forms/context/bad+name", nil)
+	req.SetPathValue("name", "bad+name")
+	rr := httptest.NewRecorder()
+	c.EditContextForm(rr, req)
+
+	if rr.Code != http.StatusBadRequest {
+		t.Errorf("bad name: got %d want 400", rr.Code)
+	}
+}
+
 func newContexts() *Contexts {
 	return &Contexts{TW: tw.NewClient(), Logger: discardLogger()}
 }

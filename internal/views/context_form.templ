@@ -1,0 +1,90 @@
+package views
+
+templ ContextFormModal(csrf, name, readFilter, writeFilter string, isNew bool) {
+	@modalShell() {
+		if isNew {
+			@modalHeader("New context")
+		} else {
+			@modalHeader("Edit context")
+		}
+		<form
+			if isNew {
+				hx-post="/contexts"
+			} else {
+				hx-put={ "/contexts/" + name }
+			}
+			hx-target-error="#context-form-errors"
+			hx-swap="none"
+			hx-on::after-request="if(event.detail.successful) { document.getElementById('task-modal').close(); htmx.trigger(document.body, 'refresh'); }"
+		>
+			<input type="hidden" name="_csrf" value={ csrf }/>
+			<div class="flex flex-col gap-4 p-4">
+				<label class="block text-sm">
+					<span class="font-medium text-zinc-700 dark:text-zinc-300">Name</span>
+					<input
+						type="text"
+						name="name"
+						value={ name }
+						required
+						autofocus
+						if !isNew {
+							placeholder={ name }
+						}
+						class="mt-1 block w-full rounded border border-zinc-300 bg-white px-3 py-1.5 text-sm text-zinc-900 focus:border-blue-500 focus:outline-none focus:ring-1 focus:ring-blue-500 dark:border-zinc-700 dark:bg-zinc-800 dark:text-zinc-100 dark:focus:border-blue-400 dark:focus:ring-blue-400"
+						pattern="[a-zA-Z0-9_\-]+"
+						title="Letters, digits, dash and underscore only"
+					/>
+					<span class="mt-0.5 block text-xs text-zinc-400 dark:text-zinc-500">Letters, digits, dash and underscore only. Changing the name renames the context.</span>
+				</label>
+				<label class="block text-sm">
+					<span class="font-medium text-zinc-700 dark:text-zinc-300">Read filter</span>
+					@contextFilterHelp()
+					<input
+						type="text"
+						name="read_filter"
+						value={ readFilter }
+						required
+						placeholder="+tag or project:name or due.before:7d"
+						class="mt-1 block w-full rounded border border-zinc-300 bg-white px-3 py-1.5 font-mono text-sm text-zinc-900 focus:border-blue-500 focus:outline-none focus:ring-1 focus:ring-blue-500 dark:border-zinc-700 dark:bg-zinc-800 dark:text-zinc-100 dark:focus:border-blue-400 dark:focus:ring-blue-400"
+					/>
+				</label>
+				<label class="block text-sm">
+					<span class="font-medium text-zinc-700 dark:text-zinc-300">Write filter <span class="font-normal text-zinc-400 dark:text-zinc-500">(optional)</span></span>
+					<input
+						type="text"
+						name="write_filter"
+						value={ writeFilter }
+						placeholder="+tag or project:name"
+						class="mt-1 block w-full rounded border border-zinc-300 bg-white px-3 py-1.5 font-mono text-sm text-zinc-900 focus:border-blue-500 focus:outline-none focus:ring-1 focus:ring-blue-500 dark:border-zinc-700 dark:bg-zinc-800 dark:text-zinc-100 dark:focus:border-blue-400 dark:focus:ring-blue-400"
+					/>
+					<span class="mt-0.5 block text-xs text-zinc-400 dark:text-zinc-500">Automatically applied when adding a task while this context is active.</span>
+				</label>
+				<div id="context-form-errors" class="empty:hidden rounded border border-red-200 bg-red-50 px-3 py-2 text-sm text-red-700 dark:border-red-800 dark:bg-red-950/40 dark:text-red-300"></div>
+			</div>
+			<div class="flex items-center justify-end gap-2 border-t border-zinc-200 px-4 py-3 dark:border-zinc-700">
+				<button type="button" data-dismiss-modal class="rounded px-3 py-1.5 text-sm text-zinc-600 hover:bg-zinc-100 dark:text-zinc-400 dark:hover:bg-zinc-800">Cancel</button>
+				if isNew {
+					<button type="submit" class="rounded bg-blue-600 px-3 py-1.5 text-sm font-medium text-white hover:bg-blue-700 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:ring-offset-2 dark:focus:ring-offset-zinc-950">Create</button>
+				} else {
+					<button type="submit" class="rounded bg-blue-600 px-3 py-1.5 text-sm font-medium text-white hover:bg-blue-700 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:ring-offset-2 dark:focus:ring-offset-zinc-950">Save</button>
+				}
+			</div>
+		</form>
+	}
+}
+
+// contextFilterHelp is a small inline disclosure explaining Taskwarrior filter syntax.
+templ contextFilterHelp() {
+	<details class="inline">
+		<summary class="ml-1 inline cursor-pointer text-xs text-zinc-400 hover:text-zinc-600 dark:text-zinc-500 dark:hover:text-zinc-300 [&::-webkit-details-marker]:hidden">?</summary>
+		<div class="mt-1 rounded border border-zinc-200 bg-zinc-50 px-3 py-2 text-xs text-zinc-600 dark:border-zinc-700 dark:bg-zinc-800 dark:text-zinc-300">
+			<p class="font-medium">Filter syntax examples</p>
+			<ul class="mt-1 space-y-0.5 font-mono">
+				<li><code>+work</code> — has tag "work"</li>
+				<li><code>project:home</code> — in project "home"</li>
+				<li><code>due.before:7d</code> — due within 7 days</li>
+				<li><code>+work or project:client</code> — combine with or/and</li>
+			</ul>
+		</div>
+	</details>
+}

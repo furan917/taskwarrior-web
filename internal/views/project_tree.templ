@@ -1,0 +1,62 @@
+package views
+
+import "fmt"
+
+templ ProjectTree(roots []ProjectTreeNode) {
+	<ul class="divide-y divide-zinc-200 rounded border border-zinc-200 bg-white dark:divide-zinc-800 dark:border-zinc-800 dark:bg-zinc-900">
+		for _, node := range roots {
+			@projectTreeNode(node, 0)
+		}
+	</ul>
+}
+
+templ projectTreeNode(node ProjectTreeNode, depth int) {
+	if len(node.Children) == 0 {
+		// Leaf — plain link row, same style as the existing flat labelColumn.
+		<li>
+			<a
+				href={ templ.SafeURL("/project/" + node.FullName) }
+				class="flex items-center justify-between px-3 py-2 text-sm hover:bg-zinc-50 dark:hover:bg-zinc-800"
+				style={ depthPadding(depth) }
+			>
+				<span class="truncate text-zinc-800 dark:text-zinc-200">{ node.FullName }</span>
+				<span class="ml-2 inline-flex items-center rounded bg-zinc-100 px-2 py-0.5 text-xs font-medium text-zinc-700 dark:bg-zinc-800 dark:text-zinc-200">{ fmt.Sprintf("%d", node.TotalCount) }</span>
+			</a>
+		</li>
+	} else {
+		// Branch — <details open> so the tree starts expanded.
+		<li>
+			<details open class="group">
+				<summary class="flex cursor-pointer list-none items-center justify-between px-3 py-2 text-sm hover:bg-zinc-50 [&::-webkit-details-marker]:hidden dark:hover:bg-zinc-800" style={ depthPadding(depth) }>
+					<span class="flex items-center gap-1.5">
+						<svg class="h-3 w-3 shrink-0 text-zinc-400 transition-transform group-open:rotate-90 dark:text-zinc-500" viewBox="0 0 20 20" fill="currentColor" aria-hidden="true">
+							<path fill-rule="evenodd" d="M7.21 14.77a.75.75 0 01.02-1.06L11.168 10 7.23 6.29a.75.75 0 111.04-1.08l4.5 4.25a.75.75 0 010 1.08l-4.5 4.25a.75.75 0 01-1.06-.02z" clip-rule="evenodd"></path>
+						</svg>
+						if node.HasOwnTasks {
+							<a
+								href={ templ.SafeURL("/project/" + node.FullName) }
+								class="font-medium text-zinc-800 hover:underline dark:text-zinc-200"
+								onClick="event.stopPropagation()"
+							>{ node.FullName }</a>
+						} else {
+							<span class="font-medium text-zinc-800 dark:text-zinc-200">{ node.FullName }</span>
+						}
+					</span>
+					<span class="ml-2 inline-flex items-center rounded bg-zinc-100 px-2 py-0.5 text-xs font-medium text-zinc-700 dark:bg-zinc-800 dark:text-zinc-200">{ fmt.Sprintf("%d", node.TotalCount) }</span>
+				</summary>
+				<ul class="border-t border-zinc-100 dark:border-zinc-800">
+					for _, child := range node.Children {
+						@projectTreeNode(child, depth+1)
+					}
+				</ul>
+			</details>
+		</li>
+	}
+}
+
+func depthPadding(depth int) string {
+	if depth == 0 {
+		return ""
+	}
+	return fmt.Sprintf("padding-left: %drem", depth+1)
+}

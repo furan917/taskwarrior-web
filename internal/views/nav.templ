@@ -108,9 +108,10 @@ templ mobileNavDrawer(active string, builtinReports, customReports []string) {
 				<div class="mt-3 border-t border-zinc-200 pt-3 dark:border-zinc-800">
 					@drawerSectionLabel("Lookups")
 					<div class="space-y-0.5">
+						@drawerNavLink("/contexts", "Contexts", active == "contexts")
+						@drawerNavLink("/done", "Done", active == "done")
 						@drawerNavLink("/forecast", "Forecast", active == "forecast")
 						@drawerNavLink("/timesheet", "Timesheet", active == "timesheet")
-						@drawerNavLink("/done", "Done", active == "done")
 					</div>
 				</div>
 				if len(builtinReports) > 0 {
@@ -184,9 +185,10 @@ templ moreMenu(active string, builtinReports, customReports []string) {
 		>
 			<div class="max-h-96 overflow-y-auto py-1 text-sm">
 				@moreSectionHeader("Lookups")
+				@moreMenuLink("/contexts", "Contexts", active == "contexts")
+				@moreMenuLink("/done", "Done", active == "done")
 				@moreMenuLink("/forecast", "Forecast", active == "forecast")
 				@moreMenuLink("/timesheet", "Timesheet", active == "timesheet")
-				@moreMenuLink("/done", "Done", active == "done")
 				if len(builtinReports) > 0 {
 					@moreSectionHeader("Built-in")
 					for _, name := range builtinReports {
@@ -208,7 +210,7 @@ templ moreMenu(active string, builtinReports, customReports []string) {
 // the dropdown matches the current page. This mirrors the navLink active
 // state so users always see "you are inside this menu".
 func moreActive(active string) bool {
-	if active == "forecast" || active == "done" || active == "timesheet" {
+	if active == "forecast" || active == "done" || active == "timesheet" || active == "contexts" {
 		return true
 	}
 	if len(active) > 2 && active[:2] == "r-" {
@@ -336,7 +338,9 @@ templ contextDropdown(activeContext string, contexts []NamedContext) {
 				@contextMenuItem(c.Name, c.Name, c.Name == activeContext)
 			}
 		</div>
-		<div class="border-t border-zinc-200 px-3 py-1.5 text-[11px] text-zinc-500 dark:border-zinc-700 dark:text-zinc-400">Defined via CLI</div>
+		<div class="border-t border-zinc-200 dark:border-zinc-700">
+			<a href="/contexts" class="flex w-full items-center px-3 py-1.5 text-[11px] text-zinc-500 hover:bg-zinc-50 hover:text-zinc-700 dark:text-zinc-400 dark:hover:bg-zinc-800 dark:hover:text-zinc-300">Manage contexts…</a>
+		</div>
 	</div>
 }
 
