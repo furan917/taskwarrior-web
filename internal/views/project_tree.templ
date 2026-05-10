@@ -12,7 +12,7 @@ templ ProjectTree(roots []ProjectTreeNode) {
 
 templ projectTreeNode(node ProjectTreeNode, depth int) {
 	if len(node.Children) == 0 {
-		// Leaf — plain link row, same style as the existing flat labelColumn.
+		// Leaf — plain link row.
 		<li>
 			<a
 				href={ templ.SafeURL("/project/" + node.FullName) }
@@ -20,7 +20,7 @@ templ projectTreeNode(node ProjectTreeNode, depth int) {
 				style={ depthPadding(depth) }
 			>
 				<span class="truncate text-zinc-800 dark:text-zinc-200">{ node.FullName }</span>
-				<span class="ml-2 inline-flex items-center rounded bg-zinc-100 px-2 py-0.5 text-xs font-medium text-zinc-700 dark:bg-zinc-800 dark:text-zinc-200">{ fmt.Sprintf("%d", node.TotalCount) }</span>
+				@projectNodeMeta(node)
 			</a>
 		</li>
 	} else {
@@ -42,7 +42,7 @@ templ projectTreeNode(node ProjectTreeNode, depth int) {
 							<span class="font-medium text-zinc-800 dark:text-zinc-200">{ node.FullName }</span>
 						}
 					</span>
-					<span class="ml-2 inline-flex items-center rounded bg-zinc-100 px-2 py-0.5 text-xs font-medium text-zinc-700 dark:bg-zinc-800 dark:text-zinc-200">{ fmt.Sprintf("%d", node.TotalCount) }</span>
+					@projectNodeMeta(node)
 				</summary>
 				<ul class="border-t border-zinc-100 dark:border-zinc-800">
 					for _, child := range node.Children {
@@ -51,6 +51,45 @@ templ projectTreeNode(node ProjectTreeNode, depth int) {
 				</ul>
 			</details>
 		</li>
+	}
+}
+
+// projectNodeMeta renders the right-hand stat cluster: pending count badge,
+// optional % complete badge, and optional avg age hint.
+templ projectNodeMeta(node ProjectTreeNode) {
+	<span class="ml-2 flex shrink-0 items-center gap-1.5">
+		if node.AvgAgeDays() > 0 {
+			<span class="text-[11px] text-zinc-400 dark:text-zinc-500">{ formatAge(node.AvgAgeDays()) }</span>
+		}
+		if node.TotalCompleted > 0 {
+			<span class={ percentBadgeClass(node.PercentComplete()) }>{ fmt.Sprintf("%d%%", node.PercentComplete()) }</span>
+		}
+		<span class="inline-flex items-center rounded bg-zinc-100 px-2 py-0.5 text-xs font-medium text-zinc-700 dark:bg-zinc-800 dark:text-zinc-200">{ fmt.Sprintf("%d", node.TotalCount) }</span>
+	</span>
+}
+
+func percentBadgeClass(pct int) string {
+	base := "inline-flex items-center rounded px-2 py-0.5 text-xs font-medium "
+	switch {
+	case pct >= 80:
+		return base + "bg-emerald-100 text-emerald-700 dark:bg-emerald-900/40 dark:text-emerald-300"
+	case pct >= 40:
+		return base + "bg-amber-100 text-amber-700 dark:bg-amber-900/40 dark:text-amber-300"
+	default:
+		return base + "bg-zinc-100 text-zinc-500 dark:bg-zinc-800 dark:text-zinc-400"
+	}
+}
+
+func formatAge(days float64) string {
+	switch {
+	case days < 1:
+		return "< 1d"
+	case days < 14:
+		return fmt.Sprintf("%dd", int(days))
+	case days < 60:
+		return fmt.Sprintf("%dw", int(days/7))
+	default:
+		return fmt.Sprintf("%dmo", int(days/30))
 	}
 }
 

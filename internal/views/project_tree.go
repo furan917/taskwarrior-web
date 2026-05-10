@@ -5,30 +5,62 @@ import (
 	"strings"
 )
 
+// ProjectInput is the per-project row fed to BuildProjectTree. Pending is the
+// open (pending+waiting) task count; Completed is the finished-task count;
+// TotalAgeSecs is the sum of (now − entry) in seconds across all Pending tasks,
+// used to compute an average age for the subtree.
+type ProjectInput struct {
+	Name         string
+	Pending      int
+	Completed    int
+	TotalAgeSecs int64
+}
+
 // ProjectTreeNode is one node in the project name hierarchy. Taskwarrior uses
 // dot-notation (e.g. "work.client.acme") to express parent/child relationships
 // between projects. BuildProjectTree splits those names and assembles them into
 // a tree so the Browse page can render collapsible branches instead of a flat list.
 type ProjectTreeNode struct {
-	Segment     string // the last dot-segment of this node's name
-	FullName    string // full dot-joined name, used as the /project/<name> href
-	SelfCount   int    // open tasks attributed to exactly this project name
-	TotalCount  int    // SelfCount + sum of all descendant TotalCounts
-	HasOwnTasks bool   // SelfCount > 0; controls whether the node links to /project/<FullName>
-	Children    []ProjectTreeNode
+	Segment        string // the last dot-segment of this node's name
+	FullName       string // full dot-joined name, used as the /project/<name> href
+	SelfCount      int    // open tasks attributed to exactly this project name
+	TotalCount     int    // SelfCount + sum of all descendant TotalCounts (pending)
+	SelfCompleted  int    // completed tasks at exactly this project level
+	TotalCompleted int    // SelfCompleted + sum of descendant TotalCompleted
+	TotalAgeSecs   int64  // sum of pending-task ages in seconds across this subtree
+	HasOwnTasks    bool   // SelfCount > 0; controls whether the node links to /project/<FullName>
+	Children       []ProjectTreeNode
 }
 
-// BuildProjectTree converts the flat []Counted list (project name + open-task
-// count) into a tree of ProjectTreeNodes. Children within each node are sorted
-// by TotalCount descending then FullName ascending, matching the existing
-// sortedCounted order for the flat Browse list.
-func BuildProjectTree(items []Counted) []ProjectTreeNode {
+// PercentComplete returns the integer percentage of tasks in this subtree that
+// are complete: TotalCompleted / (TotalCount + TotalCompleted) * 100.
+// Returns 0 when no tasks of either kind exist.
+func (n ProjectTreeNode) PercentComplete() int {
+	total := n.TotalCount + n.TotalCompleted
+	if total == 0 {
+		return 0
+	}
+	return n.TotalCompleted * 100 / total
+}
+
+// AvgAgeDays returns the mean age in days of the pending tasks in this subtree.
+func (n ProjectTreeNode) AvgAgeDays() float64 {
+	if n.TotalCount == 0 {
+		return 0
+	}
+	return float64(n.TotalAgeSecs) / float64(n.TotalCount) / 86400
+}
+
+// BuildProjectTree converts the flat []ProjectInput list into a tree of
+// ProjectTreeNodes. Children within each node are sorted by TotalCount
+// descending then FullName ascending.
+func BuildProjectTree(items []ProjectInput) []ProjectTreeNode {
 	if len(items) == 0 {
 		return nil
 	}
 
 	// nodeMap holds pointers during construction so we can wire children and
-	// accumulate TotalCount without being tripped up by Go map iteration order.
+	// accumulate counts without being tripped up by Go map iteration order.
 	nodeMap := map[string]*ProjectTreeNode{}
 
 	for _, item := range items {
@@ -42,15 +74,15 @@ func BuildProjectTree(items []Counted) []ProjectTreeNode {
 				}
 			}
 			if i == len(segments)-1 {
-				nodeMap[full].SelfCount = item.Count
-				nodeMap[full].HasOwnTasks = item.Count > 0
+				nodeMap[full].SelfCount = item.Pending
+				nodeMap[full].SelfCompleted = item.Completed
+				nodeMap[full].TotalAgeSecs = item.TotalAgeSecs
+				nodeMap[full].HasOwnTasks = item.Pending > 0
 			}
 		}
 	}
 
 	// Record parent→children relationships using pointers from nodeMap.
-	// We must NOT append value copies here — the children map is built from
-	// nodeMap pointers so that each entry always refers to the canonical node.
 	ptrChildren := make(map[string][]*ProjectTreeNode)
 	var rootPtrs []*ProjectTreeNode
 	for full := range nodeMap {
@@ -63,7 +95,7 @@ func BuildProjectTree(items []Counted) []ProjectTreeNode {
 		}
 	}
 
-	// Recursively build a value tree bottom-up, accumulating TotalCount.
+	// Recursively build a value tree bottom-up, accumulating all subtree totals.
 	var buildNode func(full string) ProjectTreeNode
 	buildNode = func(full string) ProjectTreeNode {
 		node := *nodeMap[full]
@@ -72,8 +104,11 @@ func BuildProjectTree(items []Counted) []ProjectTreeNode {
 			node.Children = append(node.Children, buildNode(childPtr.FullName))
 		}
 		node.TotalCount = node.SelfCount
+		node.TotalCompleted = node.SelfCompleted
 		for _, c := range node.Children {
 			node.TotalCount += c.TotalCount
+			node.TotalCompleted += c.TotalCompleted
+			node.TotalAgeSecs += c.TotalAgeSecs
 		}
 		sortNodes(node.Children)
 		return node

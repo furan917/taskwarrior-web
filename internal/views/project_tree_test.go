@@ -11,9 +11,9 @@ func TestBuildProjectTree_Empty(t *testing.T) {
 }
 
 func TestBuildProjectTree_FlatNoHierarchy(t *testing.T) {
-	input := []Counted{
-		{Name: "alpha", Count: 3},
-		{Name: "beta", Count: 1},
+	input := []ProjectInput{
+		{Name: "alpha", Pending: 3},
+		{Name: "beta", Pending: 1},
 	}
 	roots := BuildProjectTree(input)
 	if len(roots) != 2 {
@@ -37,10 +37,10 @@ func TestBuildProjectTree_FlatNoHierarchy(t *testing.T) {
 }
 
 func TestBuildProjectTree_TwoLevels(t *testing.T) {
-	input := []Counted{
-		{Name: "work.a", Count: 3},
-		{Name: "work.b", Count: 5},
-		{Name: "home", Count: 2},
+	input := []ProjectInput{
+		{Name: "work.a", Pending: 3},
+		{Name: "work.b", Pending: 5},
+		{Name: "home", Pending: 2},
 	}
 	roots := BuildProjectTree(input)
 
@@ -82,10 +82,10 @@ func TestBuildProjectTree_TwoLevels(t *testing.T) {
 }
 
 func TestBuildProjectTree_ThreeLevels(t *testing.T) {
-	input := []Counted{
-		{Name: "work.eng.backend", Count: 2},
-		{Name: "work.eng.frontend", Count: 1},
-		{Name: "work.product", Count: 4},
+	input := []ProjectInput{
+		{Name: "work.eng.backend", Pending: 2},
+		{Name: "work.eng.frontend", Pending: 1},
+		{Name: "work.product", Pending: 4},
 	}
 	roots := BuildProjectTree(input)
 	if len(roots) != 1 {
@@ -118,9 +118,9 @@ func TestBuildProjectTree_ThreeLevels(t *testing.T) {
 
 func TestBuildProjectTree_BranchWithOwnTasks(t *testing.T) {
 	// "work" itself has tasks AND children
-	input := []Counted{
-		{Name: "work", Count: 1},
-		{Name: "work.sub", Count: 3},
+	input := []ProjectInput{
+		{Name: "work", Pending: 1},
+		{Name: "work.sub", Pending: 3},
 	}
 	roots := BuildProjectTree(input)
 	if len(roots) != 1 {
@@ -139,7 +139,7 @@ func TestBuildProjectTree_BranchWithOwnTasks(t *testing.T) {
 }
 
 func TestBuildProjectTree_SegmentIsLastPart(t *testing.T) {
-	input := []Counted{{Name: "a.b.c", Count: 1}}
+	input := []ProjectInput{{Name: "a.b.c", Pending: 1}}
 	roots := BuildProjectTree(input)
 	if len(roots) != 1 {
 		t.Fatalf("got %d roots, want 1", len(roots))
@@ -154,5 +154,54 @@ func TestBuildProjectTree_SegmentIsLastPart(t *testing.T) {
 	leaf := child.Children[0]
 	if leaf.Segment != "c" {
 		t.Errorf("leaf segment: got %q, want %q", leaf.Segment, "c")
+	}
+}
+
+func TestBuildProjectTree_CompletedAndAge(t *testing.T) {
+	const day = int64(86400)
+	input := []ProjectInput{
+		{Name: "work.a", Pending: 2, Completed: 2, TotalAgeSecs: 4 * day},
+		{Name: "work.b", Pending: 0, Completed: 1, TotalAgeSecs: 0},
+	}
+	roots := BuildProjectTree(input)
+	if len(roots) != 1 {
+		t.Fatalf("expected 1 root, got %d", len(roots))
+	}
+	work := roots[0]
+
+	// Subtree totals roll up correctly.
+	if work.TotalCount != 2 {
+		t.Errorf("work.TotalCount: got %d, want 2", work.TotalCount)
+	}
+	if work.TotalCompleted != 3 {
+		t.Errorf("work.TotalCompleted: got %d, want 3", work.TotalCompleted)
+	}
+
+	// PercentComplete: 3/(2+3) = 60%
+	if got := work.PercentComplete(); got != 60 {
+		t.Errorf("work.PercentComplete(): got %d, want 60", got)
+	}
+
+	// AvgAgeDays: 4 days total / 2 pending = 2.0
+	if got := work.AvgAgeDays(); got != 2.0 {
+		t.Errorf("work.AvgAgeDays(): got %v, want 2.0", got)
+	}
+
+	// work.a has both pending and completed.
+	wa := work.Children[0] // sorted by TotalCount desc: work.a(2) before work.b(0)
+	if wa.FullName != "work.a" {
+		t.Fatalf("expected work.a first, got %s", wa.FullName)
+	}
+	if wa.PercentComplete() != 50 {
+		t.Errorf("work.a PercentComplete: got %d, want 50", wa.PercentComplete())
+	}
+
+	// work.b: 0 pending, 1 completed = 100%
+	wb := work.Children[1]
+	if wb.FullName != "work.b" {
+		t.Fatalf("expected work.b second, got %s", wb.FullName)
+	}
+	if wb.PercentComplete() != 100 {
+		t.Errorf("work.b PercentComplete: got %d, want 100", wb.PercentComplete())
 	}
 }

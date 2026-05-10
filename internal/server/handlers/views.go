@@ -206,24 +206,71 @@ func (v *Views) renderReport(w http.ResponseWriter, r *http.Request, name string
 // (pending or waiting) tasks, with counts. Each entry links into the
 // corresponding /project/{name} or /tag/{name} drilldown.
 func (v *Views) Labels(w http.ResponseWriter, r *http.Request) {
-	tasks, err := v.exportWithContext(r, "(status:pending or status:waiting)")
+	open, err := v.exportWithContext(r, "(status:pending or status:waiting)")
 	if err != nil {
 		v.Logger.Error("labels fetch failed", "err", err)
 		http.Error(w, "fetch failed", http.StatusInternalServerError)
 		return
 	}
-	projectCounts := map[string]int{}
+	done, err := v.exportWithContext(r, "status:completed")
+	if err != nil {
+		v.Logger.Error("labels completed fetch failed", "err", err)
+		http.Error(w, "fetch failed", http.StatusInternalServerError)
+		return
+	}
+
+	now := time.Now()
+	type projectStats struct {
+		pending      int
+		completed    int
+		totalAgeSecs int64
+	}
+	pm := map[string]*projectStats{}
+	ensure := func(name string) *projectStats {
+		if pm[name] == nil {
+			pm[name] = &projectStats{}
+		}
+		return pm[name]
+	}
+
 	tagCounts := map[string]int{}
-	for _, t := range tasks {
+	for _, t := range open {
 		if t.Project != "" {
-			projectCounts[t.Project]++
+			ps := ensure(t.Project)
+			ps.pending++
+			if entry, err := tw.ParseTime(t.Entry); err == nil && !entry.IsZero() {
+				ps.totalAgeSecs += int64(now.Sub(entry).Seconds())
+			}
 		}
 		for _, tag := range t.Tags {
 			tagCounts[tag]++
 		}
 	}
+	for _, t := range done {
+		if t.Project != "" {
+			ensure(t.Project).completed++
+		}
+	}
+
+	inputs := make([]views.ProjectInput, 0, len(pm))
+	for name, ps := range pm {
+		inputs = append(inputs, views.ProjectInput{
+			Name:         name,
+			Pending:      ps.pending,
+			Completed:    ps.completed,
+			TotalAgeSecs: ps.totalAgeSecs,
+		})
+	}
+	// Sort by pending desc, name asc — matches the old sortedCounted order.
+	sort.SliceStable(inputs, func(i, j int) bool {
+		if inputs[i].Pending != inputs[j].Pending {
+			return inputs[i].Pending > inputs[j].Pending
+		}
+		return inputs[i].Name < inputs[j].Name
+	})
+
 	page := v.buildPage(r, "Browse", "browse", false)
-	roots := views.BuildProjectTree(sortedCounted(projectCounts))
+	roots := views.BuildProjectTree(inputs)
 	renderHTML(w, r, "Labels",
 		views.LabelsPage(page, roots, sortedCounted(tagCounts)),
 		v.Logger)
@@ -567,6 +614,14 @@ func (v *Views) Stats(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "task export failed", http.StatusInternalServerError)
 		return
 	}
+	// Wider completed window for the monthly history table (12 months).
+	// Separate from the daily-chart export so we don't balloon the chart window.
+	allCompleted, err := v.exportWithContext(r, "status:completed", "end.after:now-365d")
+	if err != nil {
+		v.Logger.Error("stats: history fetch failed", "err", err)
+		http.Error(w, "task export failed", http.StatusInternalServerError)
+		return
+	}
 	// Recurring count needs a separate query: parents are status:recurring
 	// (excluded from the open pool) and that's what users mean by "active
 	// recurring series" - not "pending instances that happen to carry a
@@ -580,6 +635,7 @@ func (v *Views) Stats(w http.ResponseWriter, r *http.Request) {
 	}
 	stats := computeStats(open, completed, statsHistoryDays)
 	stats.Recurring = len(recurring)
+	stats.MonthlyHistory = computeMonthlyHistory(open, allCompleted)
 	page := v.buildPage(r, "Stats", "stats", false)
 	renderHTML(w, r, "Stats", views.StatsPage(page, stats), v.Logger)
 }
@@ -654,4 +710,59 @@ func computeStats(open, completed []tw.Task, days int) views.Stats {
 		})
 	}
 	return s
+}
+
+// computeMonthlyHistory builds a newest-first slice of MonthCount covering up
+// to 12 months. "Added" is derived from the entry date of every task in both
+// slices (open tasks not yet finished; completed tasks within the 12-month
+// window). "Completed" is derived from the end date of completed tasks.
+func computeMonthlyHistory(open, completed []tw.Task) []views.MonthCount {
+	const months = 12
+	now := time.Now()
+	cutoff := now.AddDate(-1, 0, 0)
+
+	type bucket struct{ added, done int }
+	buckets := map[string]*bucket{}
+	ensure := func(ym string) *bucket {
+		if buckets[ym] == nil {
+			buckets[ym] = &bucket{}
+		}
+		return buckets[ym]
+	}
+
+	for _, t := range open {
+		if entry, err := tw.ParseTime(t.Entry); err == nil && entry.After(cutoff) {
+			ensure(entry.Local().Format("2006-01")).added++
+		}
+	}
+	for _, t := range completed {
+		if entry, err := tw.ParseTime(t.Entry); err == nil && entry.After(cutoff) {
+			ensure(entry.Local().Format("2006-01")).added++
+		}
+		if end, err := tw.ParseTime(t.Modified); err == nil && end.After(cutoff) {
+			ensure(end.Local().Format("2006-01")).done++
+		}
+	}
+
+	result := make([]views.MonthCount, 0, months)
+	for i := range months {
+		m := now.AddDate(0, -i, 0)
+		ym := m.Format("2006-01")
+		b := buckets[ym]
+		added, done := 0, 0
+		if b != nil {
+			added, done = b.added, b.done
+		}
+		// Skip trailing months with no activity at all.
+		if added == 0 && done == 0 && i > 0 {
+			continue
+		}
+		result = append(result, views.MonthCount{
+			Label:     m.Format("January 2006"),
+			YearMonth: ym,
+			Added:     added,
+			Completed: done,
+		})
+	}
+	return result
 }
