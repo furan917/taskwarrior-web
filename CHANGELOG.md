@@ -1,5 +1,12 @@
 # Changelog
 
+## [1.2.1](https://github.com/furan917/taskwarrior-web/compare/v1.2.0...v1.2.1) (2026-05-10)
+
+
+### Bug Fixes
+
+* update stats to actually show up in project and stats page ([7d70d7b](https://github.com/furan917/taskwarrior-web/commit/7d70d7bd3ae259717336798c92221cbb4222657c))
+
 ## [1.2.0](https://github.com/furan917/taskwarrior-web/compare/v1.1.0...v1.2.0) (2026-05-10)
 
 
