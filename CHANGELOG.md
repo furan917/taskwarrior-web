@@ -1,5 +1,12 @@
 # Changelog
 
+## [1.1.0](https://github.com/furan917/taskwarrior-web/compare/v1.0.1...v1.1.0) (2026-05-10)
+
+
+### Features
+
+* timesheet func + responsive design ([5216872](https://github.com/furan917/taskwarrior-web/commit/5216872f8ae2576e569c2baa336a27cfae02d522))
+
 ## [1.0.1](https://github.com/furan917/taskwarrior-web/compare/v1.0.0...v1.0.1) (2026-05-08)
 
 
