@@ -1,5 +1,12 @@
 # Changelog
 
+## [1.2.3](https://github.com/furan917/taskwarrior-web/compare/v1.2.2...v1.2.3) (2026-05-11)
+
+
+### Bug Fixes
+
+* QoL improvements for screen reader, and menu ([7e791a3](https://github.com/furan917/taskwarrior-web/commit/7e791a3366e2dd431eb996e4d1107a4ecc244160))
+
 ## [1.2.2](https://github.com/furan917/taskwarrior-web/compare/v1.2.1...v1.2.2) (2026-05-11)
 
 
