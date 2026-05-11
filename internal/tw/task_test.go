@@ -742,3 +742,69 @@ func TestIsRecurringParent(t *testing.T) {
 		t.Errorf("deleted child should not be IsRecurringParent")
 	}
 }
+
+// TestCompletedAt confirms the End-over-Modified fallback. Taskwarrior sets
+// `end` at completion and never changes it; `modified` is updated on every
+// subsequent edit. CompletedAt must always prefer `end` when present.
+func TestCompletedAt(t *testing.T) {
+	cases := []struct {
+		name     string
+		task     Task
+		wantBack string
+	}{
+		{
+			name:     "end set, modified empty",
+			task:     Task{End: "20260510T200000Z"},
+			wantBack: "20260510T200000Z",
+		},
+		{
+			name:     "modified only (no end field)",
+			task:     Task{Modified: "20260510T200000Z"},
+			wantBack: "20260510T200000Z",
+		},
+		{
+			name:     "both set — end wins",
+			task:     Task{End: "20260510T200000Z", Modified: "20260511T090000Z"},
+			wantBack: "20260510T200000Z",
+		},
+		{
+			name:     "neither set — empty string",
+			task:     Task{},
+			wantBack: "",
+		},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			if got := tc.task.CompletedAt(); got != tc.wantBack {
+				t.Errorf("got %q, want %q", got, tc.wantBack)
+			}
+		})
+	}
+}
+
+// TestTask_EndFieldDecoded confirms that the `end` JSON key is decoded into
+// Task.End and is not misclassified as a UDA.
+func TestTask_EndFieldDecoded(t *testing.T) {
+	raw := []byte(`{
+		"id": 1,
+		"uuid": "aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee",
+		"description": "finished task",
+		"status": "completed",
+		"entry": "20260501T080000Z",
+		"end": "20260510T200000Z",
+		"modified": "20260511T090000Z"
+	}`)
+	var got Task
+	if err := json.Unmarshal(raw, &got); err != nil {
+		t.Fatalf("unmarshal: %v", err)
+	}
+	if got.End != "20260510T200000Z" {
+		t.Errorf("End: got %q want %q", got.End, "20260510T200000Z")
+	}
+	if _, isUDA := got.UDAs["end"]; isUDA {
+		t.Error("end must not appear in UDAs")
+	}
+	if got.CompletedAt() != "20260510T200000Z" {
+		t.Errorf("CompletedAt: got %q want End value", got.CompletedAt())
+	}
+}

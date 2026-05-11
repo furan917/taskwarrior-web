@@ -36,6 +36,7 @@ type Task struct {
 	Description string            `json:"description"`
 	Status      string            `json:"status"`
 	Entry       string            `json:"entry"`
+	End         string            `json:"end,omitempty"`
 	Modified    string            `json:"modified,omitempty"`
 	Due         string            `json:"due,omitempty"`
 	Wait        string            `json:"wait,omitempty"`
@@ -56,6 +57,19 @@ type Task struct {
 // non-empty `start` timestamp - cleared by `task <id> stop`). Mirrors
 // Taskwarrior's `+ACTIVE` virtual tag.
 func (t Task) IsActive() bool { return t.Start != "" }
+
+// CompletedAt returns the Taskwarrior timestamp string that best represents
+// when the task was completed. Taskwarrior sets `end` at completion and never
+// changes it; `modified` is updated on any subsequent edit. Using `end`
+// directly avoids misplacing a completed-then-annotated task in time.
+// Falls back to `modified` for tasks exported from older data that may lack
+// the `end` field.
+func (t Task) CompletedAt() string {
+	if t.End != "" {
+		return t.End
+	}
+	return t.Modified
+}
 
 // IsRecurring reports whether the task carries a recurrence rule. Taskwarrior
 // distinguishes the parent template (status:recurring) from its spawned

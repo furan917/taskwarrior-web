@@ -19,8 +19,10 @@ type Stats struct {
 	WindowDays        int          // size of the "in window" period the chart + counts cover
 	Completed7d       int          // always last 7 days, regardless of window
 	CompletedInWindow int          // last WindowDays days
-	History           []DayCount   // newest-first (today at History[0]); one entry per day in WindowDays. completionChartSVG reverses to oldest-first for left-to-right rendering.
-	MonthlyHistory    []MonthCount // newest-first; up to 12 months of added/completed counts.
+	History           []DayCount    // newest-first (today at History[0]); one entry per day in WindowDays. completionChartSVG reverses to oldest-first for left-to-right rendering.
+	MonthlyHistory    []MonthCount  // newest-first; up to 12 months of added/completed counts.
+	BurndownDaily     []BurndownBar // oldest-first; 30 daily snapshots of pending count.
+	BurndownWeekly    []BurndownBar // oldest-first; 13 weekly snapshots of pending count.
 }
 
 // DayCount pairs a day label with how many tasks completed on that day.
@@ -39,6 +41,18 @@ type MonthCount struct {
 	YearMonth string // "2026-05" for stable sort key
 	Added     int
 	Completed int
+}
+
+// BurndownBar is one period's snapshot for the burndown chart, following the
+// same three-band model as `task burndown`: Pending (not yet started), Started
+// (active but not complete), and Done (cumulative completed up to this point).
+// Bars are ordered oldest-first so the SVG renders left-to-right.
+type BurndownBar struct {
+	Label   string // axis label, e.g. "4/12" for daily or "4/7" for weekly
+	Date    string // ISO YYYY-MM-DD of the period end
+	Pending int    // tasks created but not yet started at this point in time
+	Started int    // tasks started but not yet completed at this point in time
+	Done    int    // cumulative tasks completed at or before this point (within data window)
 }
 
 func (m MonthCount) Net() int { return m.Added - m.Completed }
@@ -71,7 +85,50 @@ templ StatsPage(p Page, stats Stats) {
 				@monthlyHistoryTable(stats.MonthlyHistory)
 			</div>
 		}
+		if len(stats.BurndownDaily) > 0 || len(stats.BurndownWeekly) > 0 {
+			@burndownSection(stats.BurndownDaily, stats.BurndownWeekly)
+		}
 	}
+}
+
+templ burndownSection(daily, weekly []BurndownBar) {
+	<div class="mt-6">
+		<div class="mb-2 flex items-center justify-between">
+			<h3 class="text-sm font-medium text-zinc-700 dark:text-zinc-300">Burndown · pending tasks over time</h3>
+			<div class="flex gap-1">
+				<button
+					data-burndown-tab="daily"
+					class="rounded px-2 py-0.5 text-xs font-medium bg-zinc-800 text-white dark:bg-zinc-100 dark:text-zinc-900"
+				>Daily · 30d</button>
+				<button
+					data-burndown-tab="weekly"
+					class="rounded px-2 py-0.5 text-xs font-medium text-zinc-500 hover:bg-zinc-100 dark:text-zinc-400 dark:hover:bg-zinc-800"
+				>Weekly · 13w</button>
+			</div>
+		</div>
+		<div class="rounded-lg border border-zinc-200 bg-white p-4 dark:border-zinc-800 dark:bg-zinc-900">
+			<div id="bd-daily">
+				@burndownChartSVG(daily)
+			</div>
+			<div id="bd-weekly" hidden>
+				@burndownChartSVG(weekly)
+			</div>
+			<div class="mt-2 flex items-center justify-center gap-4">
+				<span class="flex items-center gap-1.5">
+					<span class="inline-block h-2.5 w-2.5 rounded-sm bg-blue-500/70 dark:bg-blue-400/60"></span>
+					<span class="text-[11px] text-zinc-400 dark:text-zinc-500">Pending</span>
+				</span>
+				<span class="flex items-center gap-1.5">
+					<span class="inline-block h-2.5 w-2.5 rounded-sm bg-amber-400/80 dark:bg-amber-300/70"></span>
+					<span class="text-[11px] text-zinc-400 dark:text-zinc-500">Started</span>
+				</span>
+				<span class="flex items-center gap-1.5">
+					<span class="inline-block h-2.5 w-2.5 rounded-sm bg-emerald-500/70 dark:bg-emerald-400/60"></span>
+					<span class="text-[11px] text-zinc-400 dark:text-zinc-500">Done (cumulative)</span>
+				</span>
+			</div>
+		</div>
+	</div>
 }
 
 // statCard is one count tile. Tone selects the accent colour; copy is
@@ -111,6 +168,10 @@ func statCardClass(tone string) string {
 templ completionChart(history []DayCount) {
 	<div class="rounded-lg border border-zinc-200 bg-white p-4 dark:border-zinc-800 dark:bg-zinc-900">
 		@completionChartSVG(history)
+		<div class="mt-2 flex items-center justify-center gap-1.5">
+			<span class="inline-block h-2.5 w-2.5 rounded-sm bg-emerald-500/80 dark:bg-emerald-400/70"></span>
+			<span class="text-[11px] text-zinc-400 dark:text-zinc-500">tasks completed per day</span>
+		</div>
 	</div>
 }
 

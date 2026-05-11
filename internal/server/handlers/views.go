@@ -565,10 +565,9 @@ func applySort(tasks []tw.Task, s views.SortSpec) {
 func csrfToken(r *http.Request) string { return CSRFToken(r.Context()) }
 
 // Done shows recently completed tasks. Default window: last 14 days; the
-// window can be widened via `?days=N` (clamped to 1..90). Sorted by Modified
-// descending — for completed tasks Taskwarrior sets `modified` to the
-// completion timestamp, which is a close-enough proxy for `end` until we
-// surface that field on tw.Task directly.
+// window can be widened via `?days=N` (clamped to 1..90). Sorted by End
+// descending (the exact completion timestamp); falls back to Modified for
+// tasks that lack an End field.
 func (v *Views) Done(w http.ResponseWriter, r *http.Request) {
 	days := 14
 	if s := r.URL.Query().Get("days"); s != "" {
@@ -587,7 +586,7 @@ func (v *Views) Done(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	sort.SliceStable(tasks, func(i, j int) bool {
-		return tasks[i].Modified > tasks[j].Modified
+		return tasks[i].CompletedAt() > tasks[j].CompletedAt()
 	})
 	page := v.buildPage(r, fmt.Sprintf("Done · last %d days", days), "done", false)
 	renderHTML(w, r, "Done", views.DonePage(page, tasks, days), v.Logger)
@@ -636,6 +635,8 @@ func (v *Views) Stats(w http.ResponseWriter, r *http.Request) {
 	stats := computeStats(open, completed, statsHistoryDays)
 	stats.Recurring = len(recurring)
 	stats.MonthlyHistory = computeMonthlyHistory(open, allCompleted)
+	stats.BurndownDaily = computeBurndown(open, allCompleted, true, 30)
+	stats.BurndownWeekly = computeBurndown(open, allCompleted, false, 13)
 	page := v.buildPage(r, "Stats", "stats", false)
 	renderHTML(w, r, "Stats", views.StatsPage(page, stats), v.Logger)
 }
@@ -681,7 +682,7 @@ func computeStats(open, completed []tw.Task, days int) views.Stats {
 	// YYYY-MM-DD so we line up with the day labels the chart renders.
 	buckets := make(map[string]int, days)
 	for _, t := range completed {
-		end, err := tw.ParseTime(t.Modified)
+		end, err := tw.ParseTime(t.CompletedAt())
 		if err != nil || end.IsZero() {
 			continue
 		}
@@ -712,6 +713,86 @@ func computeStats(open, completed []tw.Task, days int) views.Stats {
 	return s
 }
 
+// computeBurndown returns a snapshot of the pending-task count at the end of
+// each period in the window. daily=true gives 30 one-day periods; false gives
+// 13 one-week periods. Result is oldest-first so the SVG renders left-to-right
+// without reversing.
+//
+// For each period boundary P:
+//   - An open (still-pending) task counts if entry <= P.
+//   - A completed task counts as pending if entry <= P AND end > P;
+//     it counts as done (and is excluded from pending) once end <= P.
+//
+// allCompleted is bounded by the caller's 365-day window, so tasks completed
+// more than a year ago are not reflected. For a 13-week burndown this is
+// acceptable: the trend shape is correct even if absolute values are slightly
+// lower than reality.
+func computeBurndown(open, allCompleted []tw.Task, daily bool, bars int) []views.BurndownBar {
+	now := time.Now()
+	result := make([]views.BurndownBar, bars)
+
+	for i := range bars {
+		// i=0 is the oldest period, i=bars-1 is today.
+		periodsAgo := bars - 1 - i
+		var periodEnd time.Time
+		var label, date string
+
+		if daily {
+			d := now.AddDate(0, 0, -periodsAgo)
+			periodEnd = time.Date(d.Year(), d.Month(), d.Day(), 23, 59, 59, 0, d.Location())
+			label = d.Format("1/2")
+			date = d.Format("2006-01-02")
+		} else {
+			d := now.AddDate(0, 0, -periodsAgo*7)
+			periodEnd = time.Date(d.Year(), d.Month(), d.Day(), 23, 59, 59, 0, d.Location())
+			label = d.Format("1/2")
+			date = d.Format("2006-01-02")
+		}
+
+		pending, started, done := 0, 0, 0
+
+		for _, t := range open {
+			entry, err := tw.ParseTime(t.Entry)
+			if err != nil || entry.IsZero() || entry.After(periodEnd) {
+				continue
+			}
+			if t.Start != "" {
+				if start, err := tw.ParseTime(t.Start); err == nil && !start.After(periodEnd) {
+					started++
+					continue
+				}
+			}
+			pending++
+		}
+		for _, t := range allCompleted {
+			entry, err := tw.ParseTime(t.Entry)
+			if err != nil || entry.IsZero() || entry.After(periodEnd) {
+				continue
+			}
+			end, err := tw.ParseTime(t.CompletedAt())
+			if err != nil || end.IsZero() {
+				pending++
+				continue
+			}
+			if end.After(periodEnd) {
+				// still open at this point — was it started?
+				if t.Start != "" {
+					if start, err := tw.ParseTime(t.Start); err == nil && !start.After(periodEnd) {
+						started++
+						continue
+					}
+				}
+				pending++
+			} else {
+				done++ // cumulative: completed on or before this period
+			}
+		}
+
+		result[i] = views.BurndownBar{Label: label, Date: date, Pending: pending, Started: started, Done: done}
+	}
+	return result
+}
+
 // computeMonthlyHistory builds a newest-first slice of MonthCount covering up
 // to 12 months. "Added" is derived from the entry date of every task in both
 // slices (open tasks not yet finished; completed tasks within the 12-month
@@ -739,7 +820,7 @@ func computeMonthlyHistory(open, completed []tw.Task) []views.MonthCount {
 		if entry, err := tw.ParseTime(t.Entry); err == nil && entry.After(cutoff) {
 			ensure(entry.Local().Format("2006-01")).added++
 		}
-		if end, err := tw.ParseTime(t.Modified); err == nil && end.After(cutoff) {
+		if end, err := tw.ParseTime(t.CompletedAt()); err == nil && end.After(cutoff) {
 			ensure(end.Local().Format("2006-01")).done++
 		}
 	}

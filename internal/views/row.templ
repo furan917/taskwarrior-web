@@ -79,8 +79,8 @@ templ rowFrame(t tw.Task, done bool) {
 							<span class="inline-flex items-center rounded bg-zinc-100 px-2 py-0.5 text-xs text-zinc-600 dark:bg-zinc-800 dark:text-zinc-300">{ name }: { value }</span>
 						}
 					}
-					if done && t.Modified != "" {
-						<span class="inline-flex items-center rounded bg-zinc-100 px-2 py-0.5 text-xs text-zinc-500 dark:bg-zinc-800 dark:text-zinc-400">completed { humanDateTime(t.Modified) }</span>
+					if done && t.CompletedAt() != "" {
+						<span class="inline-flex items-center rounded bg-zinc-100 px-2 py-0.5 text-xs text-zinc-500 dark:bg-zinc-800 dark:text-zinc-400">completed { humanDateTime(t.CompletedAt()) }</span>
 					}
 				</div>
 			</div>
@@ -204,7 +204,11 @@ templ rowDetailGrid(t tw.Task) {
 				{ humanDateTime(t.Wait) }
 			}
 		}
-		if t.Modified != "" {
+		if t.End != "" {
+			@detailRow("Completed", "right") {
+				{ humanDateTime(t.End) }
+			}
+		} else if t.Modified != "" {
 			@detailRow("Modified", "right") {
 				{ humanDateTime(t.Modified) }
 			}
