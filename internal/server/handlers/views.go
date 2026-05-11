@@ -257,7 +257,7 @@ func (v *Views) Labels(w http.ResponseWriter, r *http.Request) {
 			TotalAgeSecs: ps.totalAgeSecs,
 		})
 	}
-	// Sort by pending desc, name asc — matches the old sortedCounted order.
+	// Sort by pending desc, name asc - matches the old sortedCounted order.
 	sort.SliceStable(inputs, func(i, j int) bool {
 		if inputs[i].Pending != inputs[j].Pending {
 			return inputs[i].Pending > inputs[j].Pending
@@ -454,9 +454,9 @@ func (v *Views) userFilter(r *http.Request) string {
 func exportErrMsg(err error) string {
 	switch {
 	case tw.IsNotInitialised(err):
-		return "Taskwarrior is not initialised — run `task` once in a terminal to create ~/.taskrc, then reload"
+		return "Taskwarrior is not initialised - run `task` once in a terminal to create ~/.taskrc, then reload"
 	case tw.IsInvalidFilter(err):
-		return "A context filter could not be evaluated — run `task context none` to clear it, or redefine the context with export-compatible syntax (use -tag not -+tag)"
+		return "A context filter could not be evaluated - run `task context none` to clear it, or redefine the context with export-compatible syntax (use -tag not -+tag)"
 	default:
 		return "task export failed"
 	}
@@ -786,7 +786,7 @@ func computeBurndown(open, allCompleted []tw.Task, daily bool, bars int, now tim
 				continue
 			}
 			if end.After(periodEnd) {
-				// still open at this point — was it started?
+				// still open at this point - was it started?
 				if t.Start != "" {
 					if start, err := tw.ParseTime(t.Start); err == nil && !start.After(periodEnd) {
 						started++

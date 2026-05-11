@@ -378,7 +378,7 @@ func (c *Client) JournalTimeEnabled(ctx context.Context) bool {
 }
 
 // EnableJournalTime writes `journal.time=yes` to the active taskrc via
-// `task config journal.time yes`. Idempotent — safe to call if already on.
+// `task config journal.time yes`. Idempotent - safe to call if already on.
 func (c *Client) EnableJournalTime(ctx context.Context) error {
 	return c.Run(ctx, "config", "journal.time", "yes")
 }
@@ -514,7 +514,7 @@ func IsNoOpExit(err error) bool {
 }
 
 // IsNotInitialised reports whether err is a TaskExitError caused by a missing
-// ~/.taskrc — Taskwarrior exits 2 with this message when it has never been run.
+// ~/.taskrc - Taskwarrior exits 2 with this message when it has never been run.
 func IsNotInitialised(err error) bool {
 	var te *TaskExitError
 	if !errors.As(err, &te) {

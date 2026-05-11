@@ -94,13 +94,13 @@ func (c *Contexts) ManageContexts(w http.ResponseWriter, r *http.Request) {
 	renderHTML(w, r, "Contexts", views.ManageContextsPage(page, contexts, page.ActiveContext), c.Logger)
 }
 
-// CreateContextForm handles GET /forms/context/new — renders the empty create modal.
+// CreateContextForm handles GET /forms/context/new - renders the empty create modal.
 func (c *Contexts) CreateContextForm(w http.ResponseWriter, r *http.Request) {
 	csrf := csrfToken(r)
 	renderHTML(w, r, "ContextForm", views.ContextFormModal(csrf, "", "", "", true), c.Logger)
 }
 
-// EditContextForm handles GET /forms/context/{name} — renders the pre-filled edit modal.
+// EditContextForm handles GET /forms/context/{name} - renders the pre-filled edit modal.
 func (c *Contexts) EditContextForm(w http.ResponseWriter, r *http.Request) {
 	name := r.PathValue("name")
 	if !tw.ContextNamePattern.MatchString(name) {
@@ -118,7 +118,7 @@ func (c *Contexts) EditContextForm(w http.ResponseWriter, r *http.Request) {
 	renderHTML(w, r, "ContextForm", views.ContextFormModal(csrf, found.Name, found.ReadFilter, found.WriteFilter, false), c.Logger)
 }
 
-// CreateContext handles POST /contexts — creates a new context.
+// CreateContext handles POST /contexts - creates a new context.
 func (c *Contexts) CreateContext(w http.ResponseWriter, r *http.Request) {
 	name, readFilter, writeFilter, ok := parseContextForm(w, r)
 	if !ok {
@@ -138,7 +138,7 @@ func (c *Contexts) CreateContext(w http.ResponseWriter, r *http.Request) {
 	w.WriteHeader(http.StatusNoContent)
 }
 
-// UpdateContext handles PUT /contexts/{name} — updates (and optionally renames) a context.
+// UpdateContext handles PUT /contexts/{name} - updates (and optionally renames) a context.
 func (c *Contexts) UpdateContext(w http.ResponseWriter, r *http.Request) {
 	oldName := r.PathValue("name")
 	if !tw.ContextNamePattern.MatchString(oldName) {
@@ -157,7 +157,7 @@ func (c *Contexts) UpdateContext(w http.ResponseWriter, r *http.Request) {
 	w.WriteHeader(http.StatusNoContent)
 }
 
-// DeleteContext handles DELETE /contexts/{name} — removes a context.
+// DeleteContext handles DELETE /contexts/{name} - removes a context.
 func (c *Contexts) DeleteContext(w http.ResponseWriter, r *http.Request) {
 	name := r.PathValue("name")
 	if !tw.ContextNamePattern.MatchString(name) {
@@ -182,7 +182,7 @@ func parseContextForm(w http.ResponseWriter, r *http.Request) (name, readFilter,
 	readFilter = strings.TrimSpace(r.FormValue("read_filter"))
 	writeFilter = strings.TrimSpace(r.FormValue("write_filter"))
 	if !tw.ContextNamePattern.MatchString(name) {
-		http.Error(w, "invalid context name — letters, digits, dash and underscore only", http.StatusBadRequest)
+		http.Error(w, "invalid context name - letters, digits, dash and underscore only", http.StatusBadRequest)
 		return "", "", "", false
 	}
 	if readFilter == "" {
@@ -213,4 +213,3 @@ func (c *Contexts) contextFormError(w http.ResponseWriter, op string, err error)
 	}
 	http.Error(w, op+" context failed", http.StatusInternalServerError)
 }
-

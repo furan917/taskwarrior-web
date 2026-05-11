@@ -261,9 +261,9 @@ Click the pill to open a dropdown listing every defined context (plus "(none)" a
 
 **More ▾ → Contexts** (or `/contexts`) opens the manage page listing every defined context with its read filter, write filter, and active status. From there:
 
-- **New context** — opens a modal with a Name field, a Read filter field (required; supports any Taskwarrior filter expression like `+work`, `project:acme`, `+team or project:team`), and an optional Write filter. Submits to `POST /contexts`.
-- **Edit** — pre-fills the same modal for an existing context. Renaming (changing the Name field) defines the new name and deletes the old one atomically. Submits to `PUT /contexts/{name}`.
-- **Delete** — removes the context with a confirmation prompt. `DELETE /contexts/{name}`.
+- **New context** - opens a modal with a Name field, a Read filter field (required; supports any Taskwarrior filter expression like `+work`, `project:acme`, `+team or project:team`), and an optional Write filter. Submits to `POST /contexts`.
+- **Edit** - pre-fills the same modal for an existing context. Renaming (changing the Name field) defines the new name and deletes the old one atomically. Submits to `PUT /contexts/{name}`.
+- **Delete** - removes the context with a confirmation prompt. `DELETE /contexts/{name}`.
 
 After any mutation the context cache is invalidated immediately so the pill dropdown reflects the new state without waiting for the 60s TTL.
 
@@ -279,7 +279,7 @@ The Add Task modal carries its own context dropdown in the header, defaulting to
 
 The prefill is derived from each context's read filter via `views.ContextPrefill`: first lowercase `+tag` wins, otherwise first `project:value` wins, ALL-UPPERCASE virtual tags are skipped. For an OR-shaped filter like `+team or project:team or project:hiring`, the picker prefills `+team`.
 
-Note: Taskwarrior's per-context **write** filter is NOT applied automatically by the binary for OR-shaped filters — it gets confused and mangles the description. The form-level prefill is the only reliable way to keep new tasks consistent with the lens the user is working in.
+Note: Taskwarrior's per-context **write** filter is NOT applied automatically by the binary for OR-shaped filters - it gets confused and mangles the description. The form-level prefill is the only reliable way to keep new tasks consistent with the lens the user is working in.
 
 ## Dependencies
 

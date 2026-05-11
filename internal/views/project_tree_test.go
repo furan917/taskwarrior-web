@@ -44,7 +44,7 @@ func TestBuildProjectTree_TwoLevels(t *testing.T) {
 	}
 	roots := BuildProjectTree(input)
 
-	// Roots: work(TotalCount=8), home(2) — sorted desc.
+	// Roots: work(TotalCount=8), home(2) - sorted desc.
 	if len(roots) != 2 {
 		t.Fatalf("expected 2 roots, got %d: %+v", len(roots), roots)
 	}

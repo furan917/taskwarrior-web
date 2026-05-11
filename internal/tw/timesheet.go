@@ -85,10 +85,10 @@ func ParseSessions(t Task, now time.Time) []Session {
 			stop = stops[si]
 			si++
 		} else if t.IsActive() {
-			// No paired stop and task is running — ongoing session; zero stop.
+			// No paired stop and task is running - ongoing session; zero stop.
 			stop = time.Time{}
 		} else {
-			// Orphaned start with no stop and task not active — skip.
+			// Orphaned start with no stop and task not active - skip.
 			continue
 		}
 

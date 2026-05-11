@@ -163,7 +163,7 @@ func TestStatusRecorder_CapturesFirstStatusOnly(t *testing.T) {
 	inner := httptest.NewRecorder()
 	sr := &statusRecorder{ResponseWriter: inner, status: http.StatusOK}
 	sr.WriteHeader(http.StatusBadRequest)
-	sr.WriteHeader(http.StatusInternalServerError) // ignored — only first wins
+	sr.WriteHeader(http.StatusInternalServerError) // ignored - only first wins
 	if sr.status != http.StatusBadRequest {
 		t.Errorf("status: got %d want 400", sr.status)
 	}

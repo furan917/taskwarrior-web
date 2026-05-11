@@ -87,7 +87,7 @@ templ timesheetWeekContent(data TimesheetData) {
 						if day.Total > 0 {
 							<div class="mt-0.5 font-normal normal-case text-zinc-700 dark:text-zinc-300">{ formatElapsed(day.Total) }</div>
 						} else {
-							<div class="mt-0.5 font-normal normal-case text-zinc-300 dark:text-zinc-600">—</div>
+							<div class="mt-0.5 font-normal normal-case text-zinc-300 dark:text-zinc-600">-</div>
 						}
 					</div>
 				}
@@ -127,7 +127,7 @@ templ timesheetWeekMobile(data TimesheetData) {
 }
 
 // timesheetDayContent mirrors calendarDay: CardClass + p-4 wrapper, flat
-// session list (no day header — the title already names the day).
+// session list (no day header - the title already names the day).
 templ timesheetDayContent(data TimesheetData) {
 	<section class={ CardClass() + " p-4" }>
 		if len(data.Days) == 0 || len(data.Days[0].Sessions) == 0 {

@@ -6,7 +6,7 @@ import (
 )
 
 // DefineContext creates or overwrites a named context with the given read
-// filter. Taskwarrior's `task context define` is idempotent — calling it on
+// filter. Taskwarrior's `task context define` is idempotent - calling it on
 // an existing name replaces the filter in place.
 func (c *Client) DefineContext(ctx context.Context, name, readFilter string) error {
 	if !ContextNamePattern.MatchString(name) {

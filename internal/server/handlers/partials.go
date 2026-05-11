@@ -13,7 +13,7 @@ import (
 // Optional &q=<text> performs a case-insensitive substring filter against
 // description, project, and tags. Optional &filter=<expr> passes a raw
 // Taskwarrior filter expression to `task export` (ANDed with the view filter
-// and the active context). Optional &sort=<key>[:<dir>] reorders the list —
+// and the active context). Optional &sort=<key>[:<dir>] reorders the list -
 // see views.ParseSort for the accepted shape. Returns ONLY the <ul> fragment
 // (plus the sort header) for HTMX swap into the polling container.
 func (v *Views) Partial(w http.ResponseWriter, r *http.Request) {
@@ -90,7 +90,7 @@ func (v *Views) Partial(w http.ResponseWriter, r *http.Request) {
 
 // ActiveIndicator serves GET /partials/active-indicator. Returns the nav chip
 // content (count + dropdown of active task names) or empty HTML when no tasks
-// are currently active. Errors return empty rather than a nav error — a broken
+// are currently active. Errors return empty rather than a nav error - a broken
 // active-task indicator is less disruptive than a visible error in the header.
 func (v *Views) ActiveIndicator(w http.ResponseWriter, r *http.Request) {
 	tasks, _ := v.exportWithContext(r, "+ACTIVE")

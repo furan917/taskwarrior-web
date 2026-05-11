@@ -1,4 +1,4 @@
-// active_indicator.js — nav active-task chip behaviour.
+// active_indicator.js - nav active-task chip behaviour.
 //
 // 1. Click outside the open dropdown → close it.
 // 2. Click a task item inside the dropdown → close dropdown so the edit

@@ -10,7 +10,7 @@ import (
 // The container at #task-list is the polling target; its hx-trigger is gated by
 // shouldRefresh() in app.js so editing isn't interrupted.
 //
-// The poll URL omits any &q=... — full-page renders never carry a search term.
+// The poll URL omits any &q=... - full-page renders never carry a search term.
 // When the user types into the search box, the JS IIFE in app.js mirrors the
 // current q into this container's hx-get attribute so the next 30s poll keeps
 // the filter applied. The sort-sync IIFE does the same for ?sort=, and the
@@ -128,7 +128,7 @@ templ FilterBox(report, project, filter string) {
 }
 
 // SearchBox is the in-row search input. hx-preserve keeps the user's typed
-// value and focus across the 30 s poll swap and across sort-click swaps —
+// value and focus across the 30 s poll swap and across sort-click swaps -
 // the element with id="search-input" is left unmodified by HTMX even though
 // the surrounding fragment is replaced wholesale. hx-include picks up the
 // filter input too so an active TW filter is preserved on search changes.

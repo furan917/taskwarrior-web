@@ -1,4 +1,4 @@
-// chip_scroll.js — scrolls truncated calendar chip text on hover.
+// chip_scroll.js - scrolls truncated calendar chip text on hover.
 // When the inner text is wider than the chip button, a linear translateX
 // animation slides it left to reveal the full title, then snaps back on mouseout.
 (function () {

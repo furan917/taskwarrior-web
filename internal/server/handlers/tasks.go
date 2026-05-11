@@ -225,7 +225,7 @@ func (t *Tasks) Duplicate(w http.ResponseWriter, r *http.Request) {
 const maxBulkIDs = 100
 
 // Annotate appends an annotation. Re-fetches the task and renders the
-// AnnotationsPanel partial so the modal updates in-place — deliberately NO
+// AnnotationsPanel partial so the modal updates in-place - deliberately NO
 // HX-Trigger: refresh, because that would close the modal.
 func (t *Tasks) Annotate(w http.ResponseWriter, r *http.Request) {
 	t.annotateOrDenotate(w, r, true)
@@ -432,7 +432,7 @@ func (e *udaInputError) Error() string {
 }
 
 // udaValueAllowed reports whether v is in the closed enum allowlist.
-// Comparison is case-sensitive — Taskwarrior's own value comparison is
+// Comparison is case-sensitive - Taskwarrior's own value comparison is
 // case-sensitive too, so this matches its semantics.
 func udaValueAllowed(v string, allowed []string) bool {
 	for _, a := range allowed {

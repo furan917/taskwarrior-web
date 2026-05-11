@@ -12,7 +12,7 @@ templ ProjectTree(roots []ProjectTreeNode) {
 
 templ projectTreeNode(node ProjectTreeNode, depth int) {
 	if len(node.Children) == 0 {
-		// Leaf — plain link row.
+		// Leaf - plain link row.
 		<li>
 			<a
 				href={ templ.SafeURL("/project/" + node.FullName) }

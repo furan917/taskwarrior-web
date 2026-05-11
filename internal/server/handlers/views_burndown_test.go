@@ -151,7 +151,7 @@ func TestComputeBurndown_CompletedAndStarted(t *testing.T) {
 }
 
 // TestComputeBurndown_Weekly: weekly=false produces the correct bar count and
-// spacing. Smoke test — the algorithm is period-agnostic; full logic is
+// spacing. Smoke test - the algorithm is period-agnostic; full logic is
 // covered by the daily tests above.
 func TestComputeBurndown_Weekly(t *testing.T) {
 	result := computeBurndown(nil, nil, false, 13, time.Now())
@@ -262,7 +262,7 @@ func TestComputeMonthlyHistory_EndBeatsModified(t *testing.T) {
 }
 
 // TestComputeMonthlyHistory_NetSign: negative net (more done than added) is
-// good — it means the backlog is shrinking.
+// good - it means the backlog is shrinking.
 func TestComputeMonthlyHistory_NetSign(t *testing.T) {
 	m := views.MonthCount{Added: 2, Completed: 5}
 	if m.Net() != -3 {

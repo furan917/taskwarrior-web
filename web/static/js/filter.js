@@ -1,10 +1,10 @@
-// filter.js — ad-hoc Taskwarrior filter expression sync.
+// filter.js - ad-hoc Taskwarrior filter expression sync.
 //
 // After an HTMX swap into #task-list, mirror the current filter value into:
 //   1. #task-list's hx-get so the 30s poll keeps the filter alive.
 //   2. The browser URL (?filter=...) so refresh, back, and bookmarks work.
 //
-// Sibling of search.js and sort.js — each handles one URL param independently
+// Sibling of search.js and sort.js - each handles one URL param independently
 // so none needs to know about the others' state.
 (function () {
   function syncFilter() {
@@ -27,7 +27,7 @@
       }
     }
 
-    // --- 2. Keep browser URL in sync (replaceState — no history clutter) ---
+    // --- 2. Keep browser URL in sync (replaceState - no history clutter) ---
     const pageUrl = new URL(window.location.href);
     if (val) pageUrl.searchParams.set('filter', val);
     else pageUrl.searchParams.delete('filter');

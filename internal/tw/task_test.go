@@ -763,12 +763,12 @@ func TestCompletedAt(t *testing.T) {
 			wantBack: "20260510T200000Z",
 		},
 		{
-			name:     "both set — end wins",
+			name:     "both set - end wins",
 			task:     Task{End: "20260510T200000Z", Modified: "20260511T090000Z"},
 			wantBack: "20260510T200000Z",
 		},
 		{
-			name:     "neither set — empty string",
+			name:     "neither set - empty string",
 			task:     Task{},
 			wantBack: "",
 		},

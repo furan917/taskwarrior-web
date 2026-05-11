@@ -360,7 +360,7 @@ func installScript(t *testing.T, body string) string {
 // LimitReader still applies. We assert: output is bounded and no error
 // surfaces purely because the binary kept writing.
 func TestClient_RunRaw_OutputBounded(t *testing.T) {
-	// 1 MB of zeroes is fine — Export will fail to JSON-decode them, which is
+	// 1 MB of zeroes is fine - Export will fail to JSON-decode them, which is
 	// expected. We're testing the raw bound; checking that the Export path
 	// returns *some* error is enough to confirm the read was bounded and the
 	// process did not hang.
@@ -390,7 +390,7 @@ func TestClient_Run_StderrSuppressed(t *testing.T) {
 
 // TestClient_RunRaw_Timeout: the Client wraps every call in a 10 s timeout.
 // We override timeout via the unexported field by calling Export with a
-// pre-cancelled parent context — the runRaw call should return promptly with
+// pre-cancelled parent context - the runRaw call should return promptly with
 // an error rather than blocking on the subprocess.
 func TestClient_RunRaw_TimeoutCancelled(t *testing.T) {
 	installScript(t, "#!/bin/sh\nsleep 30\n")

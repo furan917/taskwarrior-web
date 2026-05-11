@@ -146,7 +146,7 @@ func rejectOptions(logger *slog.Logger, next http.Handler) http.Handler {
 }
 
 // requestLogger emits one structured log line per request: method, path
-// without query (the query may contain project names — fine — but never form
+// without query (the query may contain project names - fine - but never form
 // bodies). Generates a short request ID for correlation.
 func requestLogger(logger *slog.Logger, next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {

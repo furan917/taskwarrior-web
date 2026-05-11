@@ -132,7 +132,7 @@ func completionChartSVG(history []DayCount) templ.Component {
 
 // burndownChartSVG renders the three-band stacked burndown chart matching
 // `task burndown`: Pending (blue, bottom), Started (amber, middle), Done
-// (emerald, top — cumulative within the data window). Bars are oldest-first.
+// (emerald, top - cumulative within the data window). Bars are oldest-first.
 func burndownChartSVG(bars []BurndownBar) templ.Component {
 	return templ.ComponentFunc(func(ctx context.Context, w io.Writer) error {
 		if len(bars) == 0 {

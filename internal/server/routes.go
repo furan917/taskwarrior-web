@@ -7,7 +7,7 @@ import (
 )
 
 // staticHandler wraps the embedded FS server. Cache-Control is no-cache so the
-// browser always revalidates — assets aren't content-hashed yet, and one extra
+// browser always revalidates - assets aren't content-hashed yet, and one extra
 // localhost roundtrip per asset is cheaper than stale-JS-after-redeploy bugs.
 func staticHandler(h http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
