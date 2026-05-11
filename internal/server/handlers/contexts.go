@@ -81,12 +81,17 @@ func (c *Contexts) Set(w http.ResponseWriter, r *http.Request) {
 	w.WriteHeader(http.StatusNoContent)
 }
 
-// ManageContexts handles GET /contexts — lists all defined contexts with edit/delete actions.
+// ManageContexts handles GET /contexts - lists all defined contexts with edit/delete actions.
 func (c *Contexts) ManageContexts(w http.ResponseWriter, r *http.Request) {
 	contexts := c.TW.ContextsCached(r.Context())
-	active := activeContext(c.TW, r)
-	page := buildContextPage(c.TW, r, "Contexts", "contexts")
-	renderHTML(w, r, "Contexts", views.ManageContextsPage(page, contexts, active), c.Logger)
+	// Use the shared buildPage so the More dropdown (BuiltinReports +
+	// CustomReports) populates consistently with every other page; the
+	// /contexts route is a read-only management surface so hasTaskList=false.
+	// page.ActiveContext is the same string activeContext() returns, so
+	// reuse it for the template's per-row active marker rather than
+	// invoking the resolver a second time.
+	page := buildPage(c.TW, r, "Contexts", "contexts", false)
+	renderHTML(w, r, "Contexts", views.ManageContextsPage(page, contexts, page.ActiveContext), c.Logger)
 }
 
 // CreateContextForm handles GET /forms/context/new — renders the empty create modal.
@@ -120,12 +125,12 @@ func (c *Contexts) CreateContext(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if err := c.TW.DefineContext(r.Context(), name, readFilter); err != nil {
-		c.contextFormError(w, err)
+		c.contextFormError(w, "create", err)
 		return
 	}
 	if writeFilter != "" {
 		if err := c.TW.SetContextWriteFilter(r.Context(), name, writeFilter); err != nil {
-			c.contextFormError(w, err)
+			c.contextFormError(w, "create", err)
 			return
 		}
 	}
@@ -145,7 +150,7 @@ func (c *Contexts) UpdateContext(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if err := c.TW.RenameContext(r.Context(), oldName, newName, readFilter, writeFilter); err != nil {
-		c.contextFormError(w, err)
+		c.contextFormError(w, "update", err)
 		return
 	}
 	w.Header().Set("HX-Refresh", "true")
@@ -195,24 +200,17 @@ func parseContextForm(w http.ResponseWriter, r *http.Request) (name, readFilter,
 	return name, readFilter, writeFilter, true
 }
 
-func (c *Contexts) contextFormError(w http.ResponseWriter, err error) {
-	c.Logger.Error("context operation failed", "err", err)
+// contextFormError renders the per-form error body the HX-target picks up.
+// op is a short verb ("create", "update", "delete") so the user sees a
+// context-specific message ("delete context failed") rather than the
+// generic "operation failed" the previous shape produced - matching the
+// surrounding handler messages (e.g. Set's "set context failed").
+func (c *Contexts) contextFormError(w http.ResponseWriter, op string, err error) {
+	c.Logger.Error(op+" context failed", "err", err)
 	if errors.Is(err, tw.ErrInvalid) {
 		http.Error(w, err.Error(), http.StatusBadRequest)
 		return
 	}
-	http.Error(w, "operation failed", http.StatusInternalServerError)
+	http.Error(w, op+" context failed", http.StatusInternalServerError)
 }
 
-// buildContextPage is a minimal page builder for the contexts handler which
-// doesn't have access to views.buildPage (that lives on Views).
-func buildContextPage(twc *tw.Client, r *http.Request, title, activeView string) views.Page {
-	active := activeContext(twc, r)
-	return views.Page{
-		Title:         title,
-		ActiveView:    activeView,
-		CSRFToken:     csrfToken(r),
-		ActiveContext: active,
-		Contexts:      namedContextsForRender(twc, r, active),
-	}
-}

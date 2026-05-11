@@ -7,6 +7,12 @@ templ ContextFormModal(csrf, name, readFilter, writeFilter string, isNew bool) {
 		} else {
 			@modalHeader("Edit context")
 		}
+		// On success the handler returns HX-Refresh: true so the page does
+		// a full reload, which naturally tears down the modal - no inline
+		// hx-on::after-request handler needed. data-close-on-success on the
+		// submit button covers the no-redirect path in case a future
+		// handler ever returns just 204+HX-Trigger; matches the codebase
+		// pattern (see core_modal_close.js).
 		<form
 			if isNew {
 				hx-post="/contexts"
@@ -15,7 +21,6 @@ templ ContextFormModal(csrf, name, readFilter, writeFilter string, isNew bool) {
 			}
 			hx-target-error="#context-form-errors"
 			hx-swap="none"
-			hx-on::after-request="if(event.detail.successful) { document.getElementById('task-modal').close(); htmx.trigger(document.body, 'refresh'); }"
 		>
 			<input type="hidden" name="_csrf" value={ csrf }/>
 			<div class="flex flex-col gap-4 p-4">
@@ -64,9 +69,9 @@ templ ContextFormModal(csrf, name, readFilter, writeFilter string, isNew bool) {
 			<div class="flex items-center justify-end gap-2 border-t border-zinc-200 px-4 py-3 dark:border-zinc-700">
 				<button type="button" data-dismiss-modal class="rounded px-3 py-1.5 text-sm text-zinc-600 hover:bg-zinc-100 dark:text-zinc-400 dark:hover:bg-zinc-800">Cancel</button>
 				if isNew {
-					<button type="submit" class="rounded bg-blue-600 px-3 py-1.5 text-sm font-medium text-white hover:bg-blue-700 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:ring-offset-2 dark:focus:ring-offset-zinc-950">Create</button>
+					<button type="submit" data-close-on-success class="rounded bg-blue-600 px-3 py-1.5 text-sm font-medium text-white hover:bg-blue-700 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:ring-offset-2 dark:focus:ring-offset-zinc-950">Create</button>
 				} else {
-					<button type="submit" class="rounded bg-blue-600 px-3 py-1.5 text-sm font-medium text-white hover:bg-blue-700 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:ring-offset-2 dark:focus:ring-offset-zinc-950">Save</button>
+					<button type="submit" data-close-on-success class="rounded bg-blue-600 px-3 py-1.5 text-sm font-medium text-white hover:bg-blue-700 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:ring-offset-2 dark:focus:ring-offset-zinc-950">Save</button>
 				}
 			</div>
 		</form>
@@ -80,10 +85,10 @@ templ contextFilterHelp() {
 		<div class="mt-1 rounded border border-zinc-200 bg-zinc-50 px-3 py-2 text-xs text-zinc-600 dark:border-zinc-700 dark:bg-zinc-800 dark:text-zinc-300">
 			<p class="font-medium">Filter syntax examples</p>
 			<ul class="mt-1 space-y-0.5 font-mono">
-				<li><code>+work</code> — has tag "work"</li>
-				<li><code>project:home</code> — in project "home"</li>
-				<li><code>due.before:7d</code> — due within 7 days</li>
-				<li><code>+work or project:client</code> — combine with or/and</li>
+				<li><code>+work</code> - has tag "work"</li>
+				<li><code>project:home</code> - in project "home"</li>
+				<li><code>due.before:7d</code> - due within 7 days</li>
+				<li><code>+work or project:client</code> - combine with or/and</li>
 			</ul>
 		</div>
 	</details>

@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"log/slog"
 	"net/http"
+	"slices"
 	"sort"
 	"strconv"
 	"strings"
@@ -104,12 +105,7 @@ var builtinReportNames = []string{"active", "blocked", "overdue", "recurring", "
 // Used both to admit /r/<name> routes for built-ins and to exclude them
 // from the "Custom" dropdown section (since they get their own header).
 func isBuiltinReport(name string) bool {
-	for _, n := range builtinReportNames {
-		if n == name {
-			return true
-		}
-	}
-	return false
+	return slices.Contains(builtinReportNames, name)
 }
 
 // dynamicReportSpec resolves a report name to a reportSpec when the name is
@@ -473,16 +469,26 @@ func exportErrMsg(err error) string {
 // keybindings; pages without a task list (Labels, Calendar, Done before
 // the v5 row chrome unification) pass false to suppress them.
 func (v *Views) buildPage(r *http.Request, title, activeView string, hasTaskList bool) views.Page {
-	active := activeContext(v.TW, r)
+	return buildPage(v.TW, r, title, activeView, hasTaskList)
+}
+
+// buildPage is the canonical Page-envelope assembler shared across every
+// read handler in this package. Lives as a free function (rather than only
+// a *Views method) so the contexts handler - which doesn't hold a *Views -
+// can use it too without re-implementing the BuiltinReports / CustomReports
+// wiring. Adding a Page field stays a one-place change; before this lift,
+// /contexts silently rendered without the More-dropdown report sections.
+func buildPage(twc *tw.Client, r *http.Request, title, activeView string, hasTaskList bool) views.Page {
+	active := activeContext(twc, r)
 	return views.Page{
 		Title:          title,
 		ActiveView:     activeView,
 		CSRFToken:      csrfToken(r),
 		HasTaskList:    hasTaskList,
 		ActiveContext:  active,
-		Contexts:       namedContextsForRender(v.TW, r, active),
+		Contexts:       namedContextsForRender(twc, r, active),
 		BuiltinReports: builtinReportNames,
-		CustomReports:  customReports(v.TW.ReportsCached(r.Context())),
+		CustomReports:  customReports(twc.ReportsCached(r.Context())),
 	}
 }
 
@@ -634,9 +640,10 @@ func (v *Views) Stats(w http.ResponseWriter, r *http.Request) {
 	}
 	stats := computeStats(open, completed, statsHistoryDays)
 	stats.Recurring = len(recurring)
+	now := time.Now()
 	stats.MonthlyHistory = computeMonthlyHistory(open, allCompleted)
-	stats.BurndownDaily = computeBurndown(open, allCompleted, true, 30)
-	stats.BurndownWeekly = computeBurndown(open, allCompleted, false, 13)
+	stats.BurndownDaily = computeBurndown(open, allCompleted, true, 30, now)
+	stats.BurndownWeekly = computeBurndown(open, allCompleted, false, 13, now)
 	page := v.buildPage(r, "Stats", "stats", false)
 	renderHTML(w, r, "Stats", views.StatsPage(page, stats), v.Logger)
 }
@@ -727,8 +734,12 @@ func computeStats(open, completed []tw.Task, days int) views.Stats {
 // more than a year ago are not reflected. For a 13-week burndown this is
 // acceptable: the trend shape is correct even if absolute values are slightly
 // lower than reality.
-func computeBurndown(open, allCompleted []tw.Task, daily bool, bars int) []views.BurndownBar {
-	now := time.Now()
+// computeBurndown's `now` is injected so tests can pin a deterministic
+// clock and not drift near the UTC/local midnight crossover (the bucket
+// math clamps local-time-of-day while fixture timestamps are UTC, so the
+// previous time.Now() call introduced ~1h/day of theoretical flake).
+// Production call site passes time.Now() via the Stats handler.
+func computeBurndown(open, allCompleted []tw.Task, daily bool, bars int, now time.Time) []views.BurndownBar {
 	result := make([]views.BurndownBar, bars)
 
 	for i := range bars {

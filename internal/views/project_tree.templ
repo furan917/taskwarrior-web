@@ -16,18 +16,21 @@ templ projectTreeNode(node ProjectTreeNode, depth int) {
 		<li>
 			<a
 				href={ templ.SafeURL("/project/" + node.FullName) }
-				class="flex items-center justify-between px-3 py-2 text-sm hover:bg-zinc-50 dark:hover:bg-zinc-800"
-				style={ depthPadding(depth) }
+				class={ "flex items-center justify-between px-3 py-2 text-sm hover:bg-zinc-50 dark:hover:bg-zinc-800 " + depthPaddingClass(depth) }
 			>
 				<span class="truncate text-zinc-800 dark:text-zinc-200">{ node.FullName }</span>
 				@projectNodeMeta(node)
 			</a>
 		</li>
 	} else {
-		// Branch — <details open> so the tree starts expanded.
+		// Branch - open by default only at the top level so a deep
+		// taxonomy (team.alpha.subteam.x.y) doesn't render fully expanded
+		// as wall-of-text. Users can click into deeper branches as needed.
+		// The `open?=...` attribute uses templ's boolean-attribute form:
+		// emits `open` when the expression is true, omits it otherwise.
 		<li>
-			<details open class="group">
-				<summary class="flex cursor-pointer list-none items-center justify-between px-3 py-2 text-sm hover:bg-zinc-50 [&::-webkit-details-marker]:hidden dark:hover:bg-zinc-800" style={ depthPadding(depth) }>
+			<details open?={ depth < defaultOpenDepth } class="group">
+				<summary class={ "flex cursor-pointer list-none items-center justify-between px-3 py-2 text-sm hover:bg-zinc-50 [&::-webkit-details-marker]:hidden dark:hover:bg-zinc-800 " + depthPaddingClass(depth) }>
 					<span class="flex items-center gap-1.5">
 						<svg class="h-3 w-3 shrink-0 text-zinc-400 transition-transform group-open:rotate-90 dark:text-zinc-500" viewBox="0 0 20 20" fill="currentColor" aria-hidden="true">
 							<path fill-rule="evenodd" d="M7.21 14.77a.75.75 0 01.02-1.06L11.168 10 7.23 6.29a.75.75 0 111.04-1.08l4.5 4.25a.75.75 0 010 1.08l-4.5 4.25a.75.75 0 01-1.06-.02z" clip-rule="evenodd"></path>
@@ -93,9 +96,37 @@ func formatAge(days float64) string {
 	}
 }
 
-func depthPadding(depth int) string {
-	if depth == 0 {
+// defaultOpenDepth is the recursion depth up to (and including) which
+// `<details>` branches start expanded. depth=0 is the root; depth=1 is
+// "first nested level". Anything deeper renders closed so a 5-level
+// taxonomy doesn't paint the page on load.
+const defaultOpenDepth = 1
+
+// depthPaddingClass returns a Tailwind left-padding utility keyed off
+// recursion depth. Depths are switch-cased so Tailwind's JIT scanner sees
+// every class as a literal string at build time (a fmt.Sprintf-built class
+// would never make it into the generated CSS). Depths beyond 5 are clamped
+// to pl-28 - real project taxonomies rarely exceed 6 levels and clamping
+// is preferable to silently dropping indentation past the cap.
+//
+// Replaces the previous inline `style={ ... }` hatch (the only such inline
+// style in the codebase) so CSP `style-src 'unsafe-inline'` stays
+// defence-in-depth rather than load-bearing.
+func depthPaddingClass(depth int) string {
+	switch depth {
+	case 0:
 		return ""
+	case 1:
+		return "pl-8"
+	case 2:
+		return "pl-12"
+	case 3:
+		return "pl-16"
+	case 4:
+		return "pl-20"
+	case 5:
+		return "pl-24"
+	default:
+		return "pl-28"
 	}
-	return fmt.Sprintf("padding-left: %drem", depth+1)
 }

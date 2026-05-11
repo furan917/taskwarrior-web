@@ -8,8 +8,12 @@ import (
 )
 
 // daysAgo returns a Taskwarrior-format timestamp (UTC) N days before now.
-// Used to seed the `Modified` timestamp on completed-task fixtures so the
-// in-window cutoff comparisons in computeStats land predictably.
+// Used to seed completion-timestamp fields on fixtures so in-window cutoff
+// comparisons in computeStats / computeBurndown / computeMonthlyHistory
+// land predictably. Production code reads `End` first (via CompletedAt())
+// and falls back to `Modified`; these tests seed Modified for brevity
+// because empty End => fallback path, and the burndown suite has dedicated
+// EndBeatsModified tests for the prefer-End branch.
 func daysAgo(n int) string {
 	return time.Now().UTC().AddDate(0, 0, -n).Format("20060102T150405Z")
 }

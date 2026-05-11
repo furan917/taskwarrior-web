@@ -64,7 +64,16 @@ func BuildProjectTree(items []ProjectInput) []ProjectTreeNode {
 	nodeMap := map[string]*ProjectTreeNode{}
 
 	for _, item := range items {
-		segments := strings.Split(item.Name, ".")
+		// Defence-in-depth: a stored project name with a leading/trailing
+		// dot (e.g. "work.") would otherwise produce a child node with an
+		// empty Segment, rendering as a nameless leaf. Taskwarrior doesn't
+		// emit these in normal use; a corrupted/hostile sqlite could. Trim
+		// before splitting; if the trimmed name is empty, skip the row.
+		name := strings.Trim(item.Name, ".")
+		if name == "" {
+			continue
+		}
+		segments := strings.Split(name, ".")
 		for i, seg := range segments {
 			full := strings.Join(segments[:i+1], ".")
 			if _, ok := nodeMap[full]; !ok {

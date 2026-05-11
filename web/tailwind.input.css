@@ -29,6 +29,26 @@
     max-height: 90vh;
     overflow: auto;
   }
+
+  /*
+   * Mobile nav drawer is a <dialog> that slides in from the LEFT instead of
+   * centring. Overrides the generic dialog[open] rule above. Using <dialog>
+   * means the browser handles focus trap, ::backdrop, Esc, and rest-of-page
+   * inert natively - no JS focus-trap workaround needed (which was the bug
+   * we hit when the drawer lived inside <main> and inherited inert).
+   */
+  dialog#mobile-nav-drawer[open] {
+    top: 0;
+    left: 0;
+    right: auto;
+    bottom: 0;
+    transform: none;
+    width: 18rem;        /* w-72 */
+    max-width: 85vw;
+    max-height: 100vh;
+    height: 100vh;
+    padding: 0;
+  }
 }
 
 /*

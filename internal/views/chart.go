@@ -61,10 +61,26 @@ func completionChartSVG(history []DayCount) templ.Component {
 			barWidth = 1
 		}
 
+		// Aria summary so the chart conveys actual content to screen
+		// readers, not just "Completion history bar chart". `ordered`
+		// is the oldest-first render slice; today is the last entry.
+		// Total + peak give a one-sentence shape of the window.
+		total := 0
+		peak := 0
+		for _, d := range ordered {
+			total += d.Count
+			if d.Count > peak {
+				peak = d.Count
+			}
+		}
+		ariaLabel := fmt.Sprintf(
+			"Completion history - %d days, %d tasks completed in total, peak %d in a single day",
+			len(ordered), total, peak)
+
 		var b strings.Builder
 		fmt.Fprintf(&b,
-			`<svg viewBox="0 0 %d %d" preserveAspectRatio="xMidYMid meet" class="h-32 w-full" role="img" aria-label="Completion history bar chart">`,
-			width, height)
+			`<svg viewBox="0 0 %d %d" preserveAspectRatio="xMidYMid meet" class="h-32 w-full" role="img" aria-label="%s">`,
+			width, height, templ.EscapeString(ariaLabel))
 		// Baseline and y-axis tick lines.
 		fmt.Fprintf(&b,
 			`<line x1="%d" y1="%d" x2="%d" y2="%d" class="stroke-zinc-200 dark:stroke-zinc-700" stroke-width="1"/>`,
@@ -151,10 +167,20 @@ func burndownChartSVG(bars []BurndownBar) templ.Component {
 		scale := float64(drawHeight) / float64(maxTotal)
 		baseline := float64(padTop + drawHeight)
 
+		// Compose a one-sentence aria-label from the most recent bar so
+		// screen-reader users hear a useful summary instead of the bare
+		// "Burndown chart" label. The last bar represents "today" (bars
+		// are oldest-first) and is the value most users care about; an
+		// N-bar summary would bloat the attribute past useful length.
+		last := bars[len(bars)-1]
+		ariaLabel := fmt.Sprintf(
+			"Burndown chart - %d periods, latest: %d pending, %d started, %d done",
+			len(bars), last.Pending, last.Started, last.Done)
+
 		var sb strings.Builder
 		fmt.Fprintf(&sb,
-			`<svg viewBox="0 0 %d %d" preserveAspectRatio="xMidYMid meet" class="h-32 w-full" role="img" aria-label="Burndown chart">`,
-			width, height)
+			`<svg viewBox="0 0 %d %d" preserveAspectRatio="xMidYMid meet" class="h-32 w-full" role="img" aria-label="%s">`,
+			width, height, templ.EscapeString(ariaLabel))
 		fmt.Fprintf(&sb,
 			`<line x1="%d" y1="%d" x2="%d" y2="%d" class="stroke-zinc-200 dark:stroke-zinc-700" stroke-width="1"/>`,
 			padLeft, padTop+drawHeight, width-padRight, padTop+drawHeight)

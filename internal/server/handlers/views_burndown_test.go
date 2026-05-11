@@ -8,21 +8,12 @@ import (
 	"github.com/furan917/taskwarrior-web/internal/views"
 )
 
-// ── helpers ──────────────────────────────────────────────────────────────────
-
-// hoursAgo returns a Taskwarrior timestamp N hours before now. Used when
-// sub-day precision matters (e.g. ensuring a start time is before/after a
-// period boundary that falls at end-of-day).
-func hoursAgo(h int) string {
-	return time.Now().UTC().Add(-time.Duration(h) * time.Hour).Format("20060102T150405Z")
-}
-
 // ── computeBurndown ───────────────────────────────────────────────────────────
 
 // TestComputeBurndown_Shape: correct bar count, oldest-first ordering, and
 // non-empty labels/dates even for an all-zero dataset.
 func TestComputeBurndown_Shape(t *testing.T) {
-	result := computeBurndown(nil, nil, true, 5)
+	result := computeBurndown(nil, nil, true, 5, time.Now())
 	if len(result) != 5 {
 		t.Fatalf("len: got %d want 5", len(result))
 	}
@@ -48,7 +39,7 @@ func TestComputeBurndown_OpenPendingAllBars(t *testing.T) {
 	open := []tw.Task{
 		{Status: "pending", Entry: daysAgo(10)},
 	}
-	result := computeBurndown(open, nil, true, 3)
+	result := computeBurndown(open, nil, true, 3, time.Now())
 	for i, b := range result {
 		if b.Pending != 1 || b.Started != 0 || b.Done != 0 {
 			t.Errorf("bar %d: want Pending=1 Started=0 Done=0, got %+v", i, b)
@@ -63,7 +54,7 @@ func TestComputeBurndown_OpenPendingCreatedMidWindow(t *testing.T) {
 		{Status: "pending", Entry: daysAgo(1)},
 	}
 	// 3 daily bars: result[0]=-2d, result[1]=-1d, result[2]=today
-	result := computeBurndown(open, nil, true, 3)
+	result := computeBurndown(open, nil, true, 3, time.Now())
 	if result[0].Pending != 0 {
 		t.Errorf("bar 0 (-2d): task not yet created, want Pending=0, got %d", result[0].Pending)
 	}
@@ -82,7 +73,7 @@ func TestComputeBurndown_OpenStarted(t *testing.T) {
 		// Created 3 days ago, started 1 day ago.
 		{Status: "pending", Entry: daysAgo(3), Start: daysAgo(1)},
 	}
-	result := computeBurndown(open, nil, true, 3) // bars: -2d, -1d, today
+	result := computeBurndown(open, nil, true, 3, time.Now()) // bars: -2d, -1d, today
 	if result[0].Pending != 1 || result[0].Started != 0 {
 		t.Errorf("bar 0 (-2d, before start): want Pending=1 Started=0, got %+v", result[0])
 	}
@@ -95,13 +86,16 @@ func TestComputeBurndown_OpenStarted(t *testing.T) {
 }
 
 // TestComputeBurndown_CompletedTask: a completed task is Pending before its
-// completion date and Done (cumulative) from that point onward.
+// completion date and Done (cumulative) from that point onward. End is the
+// canonical "when did this complete" field (CompletedAt prefers it over
+// Modified); seeded explicitly so a future code change that goes back to
+// reading Modified fails here instead of silently rebucketing tasks.
 func TestComputeBurndown_CompletedTask(t *testing.T) {
 	completed := []tw.Task{
 		// Created 4 days ago, completed 1 day ago.
-		{Status: "completed", Entry: daysAgo(4), Modified: daysAgo(1)},
+		{Status: "completed", Entry: daysAgo(4), End: daysAgo(1), Modified: daysAgo(1)},
 	}
-	result := computeBurndown(nil, completed, true, 3) // bars: -2d, -1d, today
+	result := computeBurndown(nil, completed, true, 3, time.Now()) // bars: -2d, -1d, today
 	if result[0].Pending != 1 || result[0].Done != 0 {
 		t.Errorf("bar 0 (-2d, before completion): want Pending=1 Done=0, got %+v", result[0])
 	}
@@ -120,7 +114,7 @@ func TestComputeBurndown_EndBeatsModified(t *testing.T) {
 	completed := []tw.Task{
 		{Status: "completed", Entry: daysAgo(5), End: daysAgo(2), Modified: daysAgo(1)},
 	}
-	result := computeBurndown(nil, completed, true, 3) // bars: -2d, -1d, today
+	result := computeBurndown(nil, completed, true, 3, time.Now()) // bars: -2d, -1d, today
 	// Using End (2d ago): task is Done in all three bars.
 	// If Modified (1d ago) were used: bar 0 would be Pending, not Done.
 	for i, b := range result {
@@ -132,14 +126,16 @@ func TestComputeBurndown_EndBeatsModified(t *testing.T) {
 
 // TestComputeBurndown_CompletedAndStarted: a completed task that was also
 // started should appear as Started (not Pending) for the period between its
-// start date and completion date.
+// start date and completion date. End seeded explicitly (same rationale as
+// TestComputeBurndown_CompletedTask above) so the Started→Done transition
+// is anchored on End rather than the legacy Modified path.
 func TestComputeBurndown_CompletedAndStarted(t *testing.T) {
 	// Created 5d ago, started 3d ago, completed 1d ago.
 	completed := []tw.Task{
-		{Status: "completed", Entry: daysAgo(5), Start: daysAgo(3), Modified: daysAgo(1)},
+		{Status: "completed", Entry: daysAgo(5), Start: daysAgo(3), End: daysAgo(1), Modified: daysAgo(1)},
 	}
 	// Use 4 bars: -3d, -2d, -1d, today
-	result := computeBurndown(nil, completed, true, 4)
+	result := computeBurndown(nil, completed, true, 4, time.Now())
 	// bar 0 (-3d): entry<=bar, start<=bar, end>bar → Started
 	if result[0].Started != 1 || result[0].Pending != 0 {
 		t.Errorf("bar 0 (-3d, at start): want Started=1 Pending=0, got %+v", result[0])
@@ -158,7 +154,7 @@ func TestComputeBurndown_CompletedAndStarted(t *testing.T) {
 // spacing. Smoke test — the algorithm is period-agnostic; full logic is
 // covered by the daily tests above.
 func TestComputeBurndown_Weekly(t *testing.T) {
-	result := computeBurndown(nil, nil, false, 13)
+	result := computeBurndown(nil, nil, false, 13, time.Now())
 	if len(result) != 13 {
 		t.Fatalf("weekly: len got %d want 13", len(result))
 	}

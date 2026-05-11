@@ -79,12 +79,20 @@ templ Nav(active, activeContext string, contexts []NamedContext, builtinReports,
 // mobileNavDrawer is the slide-out panel for mobile. It reuses navTopLinks plus
 // the same More-menu sections (flat, no nested dropdown) so there is one list
 // of destinations to maintain.
+// mobileNavDrawer is a <dialog> opened via showModal() from mobile_nav.js.
+// Using <dialog> means the browser handles focus trap, ::backdrop, Esc,
+// scroll lock, and inert-rest-of-page natively - no JS workarounds (the
+// previous div-based drawer needed `mainEl.inert = true` which cascaded
+// to descendant drawer markup and killed every click). Top-layer
+// rendering means the dialog can live anywhere in the DOM tree; placing
+// it inside Nav keeps the nav-related markup co-located.
 templ mobileNavDrawer(active string, builtinReports, customReports []string) {
-	<div id="mobile-nav-drawer" class="fixed inset-0 z-50" aria-hidden="true" hidden>
-		// Backdrop
-		<div id="mobile-nav-backdrop" class="absolute inset-0 bg-black/50"></div>
-		// Panel
-		<div data-drawer-panel class="absolute inset-y-0 left-0 flex w-72 max-w-[85vw] flex-col bg-white shadow-xl dark:bg-zinc-900">
+	<dialog
+		id="mobile-nav-drawer"
+		class="bg-white shadow-xl dark:bg-zinc-900 backdrop:bg-black/50"
+		aria-label="Site navigation"
+	>
+		<div data-drawer-panel class="flex h-full flex-col">
 			<div class="flex items-center justify-between border-b border-zinc-200 px-4 py-3 dark:border-zinc-800">
 				<span class="text-sm font-semibold text-zinc-900 dark:text-zinc-100">Menu</span>
 				<button
@@ -136,7 +144,7 @@ templ mobileNavDrawer(active string, builtinReports, customReports []string) {
 				}
 			</div>
 		</div>
-	</div>
+	</dialog>
 }
 
 templ drawerNavLink(href, label string, active bool) {
