@@ -1,5 +1,12 @@
 # Changelog
 
+## [1.2.2](https://github.com/furan917/taskwarrior-web/compare/v1.2.1...v1.2.2) (2026-05-11)
+
+
+### Bug Fixes
+
+* switch from using modified to end attribute so burndown chart is reliable ([2feb5ac](https://github.com/furan917/taskwarrior-web/commit/2feb5acd3599992c70f0e509de51cb250afb954e))
+
 ## [1.2.1](https://github.com/furan917/taskwarrior-web/compare/v1.2.0...v1.2.1) (2026-05-10)
 
 
