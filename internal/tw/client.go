@@ -458,8 +458,8 @@ type IntervalOrigin struct {
 // before the actual import - in particular the HTTP handler's
 // index-aware overlap detection.
 type IntervalPlanItem struct {
-	Start time.Time
-	Stop  time.Time // zero -> open
+	Start  time.Time
+	Stop   time.Time // zero -> open
 	Origin IntervalOrigin
 }
 

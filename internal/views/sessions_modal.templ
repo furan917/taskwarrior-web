@@ -24,11 +24,11 @@ type SessionGroup struct {
 // sessions) the "Earlier days" button uses to request the next page; zero
 // when there's nothing more to load.
 type SessionsPage struct {
-	Groups      []SessionGroup
-	HasMore     bool
-	NextOffset  int    // day-offset for the next page, only meaningful when HasMore
-	DayFilter   string // when set, the view is scoped to this single day
-	FromTimesheet bool // whether the dialog was entered from /timesheet
+	Groups        []SessionGroup
+	HasMore       bool
+	NextOffset    int    // day-offset for the next page, only meaningful when HasMore
+	DayFilter     string // when set, the view is scoped to this single day
+	FromTimesheet bool   // whether the dialog was entered from /timesheet
 }
 
 // SessionsModal is the retroactive time-tracking editor: a stacked
