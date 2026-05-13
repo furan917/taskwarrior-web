@@ -20,6 +20,7 @@ Supports macOS (Intel + Apple Silicon) and Linux (amd64 + arm64). Requires `task
 - [templ](https://templ.guide/) for typed HTML.
 - [HTMX 2.x](https://htmx.org/) for in-place updates without an SPA.
 - [Tailwind v4](https://tailwindcss.com/) standalone CLI (no Node).
+- [flatpickr 4.6.13](https://flatpickr.js.org/) vendored under `web/static/vendor/flatpickr/` for the date/time pickers.
 - macOS launchd / Linux systemd `--user` for auto-start at login.
 
 No Docker, no Node, no database server. Reads/writes go through the existing `task` CLI on the host, which serialises against `~/.task/taskchampion.sqlite3`.
@@ -331,6 +332,8 @@ The edit modal carries a **Duplicate** action in its overflow (kebab) menu, hitt
 
 The edit modal carries a green **Mark done** button next to **Save** (with a styled confirmation), so completing a task from the calendar's chip-click flow doesn't need to drop back to the row's done circle. Same `/tasks/{id}/done` endpoint as the inline circle. The modal closes on success via a delegated `data-close-on-success` handler (replaces inline `hx-on::after-request` so CSP `unsafe-eval` stays a defence-in-depth signal rather than an active sink).
 
+On mobile the button collapses to a green checkmark icon to keep the action bar on one line; the desktop text label returns at the `sm:` breakpoint. `aria-label="Mark done"` is preserved on the icon variant.
+
 ## Inline annotation on save
 
 Typing a note in the **Add a note (or click Save to attach it)...** input then clicking **Save** attaches the note as an annotation in addition to whatever else changed. The annotation input is part of the modal's main form; the modify handler picks up the `text` field after the structured modify lands and calls `task <id> annotate`. The dedicated **Add** button still works for the "add note, keep modal open" flow.
@@ -343,6 +346,21 @@ Each row carries a small play / stop button between the bulk-select checkbox and
 
 Active tasks render the `+ACTIVE` virtual tag in the row's chip strip and are surfaced as a count card on `/stats` ("Active N"). An amber pill in the top-right of the nav shows the currently tracked task(s) across every page: click it to expand a dropdown listing active tasks with inline stop buttons, or click the task description to open its edit modal.
 
+### Retroactive sessions editor
+
+The edit modal carries a **Tracked time (N)** trigger button in its top-left (or "Add time entry" when N=0). Clicking it stacks a second modal on top - the sessions editor - listing every recorded session for the task, newest-first, grouped by local calendar day with a per-day duration roll-up. From there:
+
+- **Edit start / end** of any session - pick via the calendar icon (flatpickr) or type the value directly.
+- **Add entry** - stages a new session in the bottom panel; submitted on Save alongside any edits.
+- **Delete** - existing rows confirm first; staging-area rows remove instantly.
+- **Stop tracking** - shown only when the task is currently active; shells `task <id> stop` and closes both modals.
+
+Save submits a delta payload (`{edits, creates, deletes}`) to `PUT /tasks/{id}/intervals`, NOT a full snapshot - so a save while only the first page of session history is loaded leaves the older pages alone. Server validates the resulting interval set (no overlaps, at most one open interval) and returns 422 + structured conflict JSON on rejection; the editor renders a conflict panel at the top of the modal with editable mini-rows for each pair, hiding the source rows in the main list so the duplicate is the single source of truth for that submission.
+
+Pagination: the list loads 14 days at a time; an "Earlier days" button at the bottom appends one page via HTMX outerHTML swap, leaving every already-rendered row intact (no scroll-loss, no datetime-local input reset). Clicking a chip on the `/timesheet` view opens the same editor scoped to that day, with a back-chevron in the header that pivots to the full task editor.
+
+flatpickr powers the date/time picker on every session row's Start and End fields. Custom green-tick / red-X footer replaces the plugin's default "OK" button: the X reverts to the value the picker had on open, the tick commits. The hour/minute number inputs are switched from `type="number"` to `type="text"` + `inputmode="numeric"` and have their auto-selection cleared on focus, suppressing the iOS "Look Up / Copy / Paste" action sheet that would otherwise pop over the picker.
+
 ## Timesheet
 
 `/timesheet` shows a log of every start/stop session recorded by Taskwarrior's `journal.time` annotation mechanism. Two modes:
@@ -353,6 +371,10 @@ Active tasks render the `+ACTIVE` virtual tag in the row's chip strip and are su
 Step periods with the prev/next arrows; jump to the current period with Today. Total duration for the week (or day) appears in the column headers.
 
 Active sessions (no stop time yet) render with an amber left border so in-progress work is visually distinct from completed sessions.
+
+Each session block carries a 2px top border whose colour is hashed deterministically from the task UUID (12 hues × 3 shades = 36 palette entries; first 8 hex chars of UUID parsed as uint32 → modulo palette length). Same task → same hue across the week, so a single task tracked over 5 sessions reads as a connected ribbon. The active-session amber left border and the task-identity top border are independent axes - they coexist via side-specific `border-{l,t}-{colour}` utilities.
+
+Timesheet honours the active context filter (uses the same `exportWithContext` plumbing as every other read view), so flipping to a context narrows the timesheet to that context's tasks. Clicking any chip opens the retroactive sessions editor scoped to that day (see [Retroactive sessions editor](#retroactive-sessions-editor)).
 
 If `journal.time` is not enabled in `~/.taskrc`, the page shows a prompt explaining what's needed and a one-click **Enable time tracking** button that writes `journal.time=yes` to `~/.taskrc`. Past sessions cannot be recovered; only future start/stop events are recorded.
 
@@ -373,7 +395,9 @@ internal/views/     templ files + small Go helpers (urls, format, palette, keybi
 internal/config/    Centralised timeouts, bind addr, derived host/origin allowlists.
 web/static/         Embedded static assets (htmx.min.js, theme.js, app.css, favicon.svg).
 web/static/js/      Per-feature JS modules (core_*, keys, bulk, search, sort, row_expand,
-                    context_pill, context_picker, autocomplete, deps, form_validation).
+                    context_pill, context_picker, autocomplete, deps, form_validation,
+                    sessions_modal, form_date_picker).
+web/static/vendor/  Vendored third-party libraries (flatpickr 4.6.13).
 scripts/            Install/uninstall + the standalone tailwindcss binary.
 deploy/             LaunchAgent plist template.
 ```

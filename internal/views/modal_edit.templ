@@ -1,16 +1,20 @@
 package views
 
 import (
+	"fmt"
 	"strings"
+	"time"
 
 	"github.com/furan917/taskwarrior-web/internal/tw"
 )
 
 templ ModalEdit(csrf string, t tw.Task, udas []tw.UDA, projects, tags []string, allOpenTasks []tw.Task) {
-	@modalShell() {
+	@modalShell("task-modal") {
 		<form hx-put={ taskURL(t) } hx-target-error="#task-form-errors" hx-swap="innerHTML" class="flex flex-col">
 			<input type="hidden" name="_csrf" value={ csrf }/>
-			@modalHeader(modalEditTitle(t))
+			@modalHeader(modalEditTitle(t)) {
+				@sessionsTrigger(t)
+			}
 			if t.IsRecurringParent() {
 				@modalEditBanner("amber", "Recurring template - changes here apply to future instances. Past instances are unaffected.")
 			} else if t.Status == "deleted" {
@@ -37,7 +41,7 @@ templ ModalEdit(csrf string, t tw.Task, udas []tw.UDA, projects, tags []string, 
 			}, udas, projects, tags, allOpenTasks)
 			@AnnotationsPanel(t)
 			<div id="task-form-errors" class="empty:hidden border-t border-zinc-200 px-4 py-3 dark:border-zinc-700"></div>
-			<div class="flex items-center justify-between gap-2 border-t border-zinc-200 px-4 py-3 dark:border-zinc-700">
+			<div class="sticky bottom-0 z-10 flex items-center justify-between gap-2 border-t border-zinc-200 bg-white px-4 py-3 dark:border-zinc-700 dark:bg-zinc-900">
 				<div class="flex items-center gap-2">
 					<button
 						type="button"
@@ -81,13 +85,34 @@ templ ModalEdit(csrf string, t tw.Task, udas []tw.UDA, projects, tags []string, 
 								title="Mark this task as currently active"
 							>Start</button>
 						}
+						// Mobile shows a green checkmark icon; desktop spells
+						// out "Mark done". Renders the same button twice with
+						// matching hx-* attrs - one hidden on each breakpoint -
+						// because the visible text differs between viewports
+						// and Tailwind can't conditionally swap inner content.
+						// aria-label is present on the icon variant so SR users
+						// still hear "Mark done".
 						<button
 							type="button"
 							hx-post={ rowDoneURL(t) }
 							hx-swap="none"
 							hx-confirm="Mark this task done?"
 							data-close-on-success
-							class="rounded bg-emerald-600 px-3 py-1.5 text-sm font-medium text-white hover:bg-emerald-700 focus:outline-none focus:ring-2 focus:ring-emerald-500 focus:ring-offset-2 dark:focus:ring-offset-zinc-900"
+							aria-label="Mark done"
+							title="Mark done"
+							class="inline-flex items-center justify-center rounded bg-emerald-600 p-2 text-white hover:bg-emerald-700 focus:outline-none focus:ring-2 focus:ring-emerald-500 focus:ring-offset-2 sm:hidden dark:focus:ring-offset-zinc-900"
+						>
+							<svg class="h-4 w-4" viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+								<polyline points="3 10 8 15 17 5"></polyline>
+							</svg>
+						</button>
+						<button
+							type="button"
+							hx-post={ rowDoneURL(t) }
+							hx-swap="none"
+							hx-confirm="Mark this task done?"
+							data-close-on-success
+							class="hidden rounded bg-emerald-600 px-3 py-1.5 text-sm font-medium text-white hover:bg-emerald-700 focus:outline-none focus:ring-2 focus:ring-emerald-500 focus:ring-offset-2 sm:inline-flex dark:focus:ring-offset-zinc-900"
 						>Mark done</button>
 					}
 					<button type="submit" class="rounded bg-blue-600 px-3 py-1.5 text-sm font-medium text-white hover:bg-blue-700">Save</button>
@@ -218,4 +243,43 @@ func duplicateButtonTitle(t tw.Task) string {
 		return "Duplicate as a one-off task (recurrence is not copied)"
 	}
 	return "Duplicate this task"
+}
+
+// sessionsTrigger renders the "Sessions (N)" affordance shown below the
+// edit-modal title. Opens the stacked time-tracking editor (a separate
+// <dialog> in #sessions-modal) so the user can add / edit / delete the
+// task's recorded intervals without leaving the edit modal. Server emits
+// HX-Trigger: showSessions on the response; sessions_modal.js opens the
+// dialog. Label flips to "Add session" when the task has no recorded
+// sessions yet, so an empty state still has an explicit affordance.
+templ sessionsTrigger(t tw.Task) {
+	<button
+		type="button"
+		hx-get={ "/forms/sessions/" + t.UUID }
+		hx-target="#sessions-modal-slot"
+		hx-swap="innerHTML"
+		class="mt-1 inline-flex items-center gap-1 rounded border border-zinc-300 px-2 py-0.5 text-xs font-medium text-zinc-600 hover:bg-zinc-100 focus:outline-none focus:ring-2 focus:ring-blue-500 dark:border-zinc-600 dark:text-zinc-300 dark:hover:bg-zinc-800"
+		title="View and edit time-tracking sessions"
+		aria-label="View and edit sessions"
+	>
+		<svg class="h-3.5 w-3.5" viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+			<circle cx="10" cy="10" r="7"></circle>
+			<path d="M10 6v4l3 2"></path>
+		</svg>
+		<span data-tracked-time-label>{ sessionsTriggerLabel(t) }</span>
+	</button>
+}
+
+// sessionsTriggerLabel: "Tracked time (N)" when the task has logged
+// time; "Add time entry" as a clear empty-state CTA. Avoids "Tracked
+// time (0)" which reads as a disabled count rather than an invitation
+// to log time. The "session" jargon was opaque to new users; "tracked
+// time" / "time entry" is the standard vocabulary across other tools
+// (Toggl, Clockify, Harvest).
+func sessionsTriggerLabel(t tw.Task) string {
+	n := len(tw.ParseSessions(t, time.Now()))
+	if n == 0 {
+		return "Add time entry"
+	}
+	return fmt.Sprintf("Tracked time (%d)", n)
 }

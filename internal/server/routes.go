@@ -51,6 +51,7 @@ func registerRoutes(mux *http.ServeMux, cfg Config) {
 
 	app.HandleFunc("GET /forms/add", f.Add)
 	app.HandleFunc("GET /forms/edit/{id}", f.Edit)
+	app.HandleFunc("GET /forms/sessions/{id}", f.Sessions)
 
 	app.HandleFunc("POST /tasks", t.Create)
 	app.HandleFunc("PUT /tasks/{id}", t.Modify)
@@ -58,6 +59,7 @@ func registerRoutes(mux *http.ServeMux, cfg Config) {
 	app.HandleFunc("POST /tasks/{id}/start", t.Start)
 	app.HandleFunc("POST /tasks/{id}/stop", t.Stop)
 	app.HandleFunc("POST /tasks/{id}/duplicate", t.Duplicate)
+	app.HandleFunc("PUT /tasks/{id}/intervals", t.PutIntervals)
 	app.HandleFunc("DELETE /tasks/{id}", t.Delete)
 	app.HandleFunc("POST /tasks/bulk/done", t.BulkDone)
 	app.HandleFunc("POST /tasks/bulk/delete", t.BulkDelete)

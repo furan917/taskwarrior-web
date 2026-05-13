@@ -2,13 +2,16 @@ package handlers
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"log/slog"
 	"net/http"
 	"regexp"
+	"sort"
 	"strconv"
 	"strings"
+	"time"
 
 	"github.com/furan917/taskwarrior-web/internal/config"
 	"github.com/furan917/taskwarrior-web/internal/tw"
@@ -217,6 +220,348 @@ func (t *Tasks) Stop(w http.ResponseWriter, r *http.Request) {
 // the user can edit the new instance afterwards.
 func (t *Tasks) Duplicate(w http.ResponseWriter, r *http.Request) {
 	t.idAction(w, r, "duplicate", t.TW.Duplicate)
+}
+
+// intervalEditReq represents an edit to an existing on-disk interval.
+// Identity (OriginalStart, OriginalEnd) names the pair as it currently
+// exists in the task's journal annotations. OriginalEnd is nil when the
+// pair is currently open (active task with only a Started annotation).
+type intervalEditReq struct {
+	OriginalStart time.Time  `json:"originalStart"`
+	OriginalEnd   *time.Time `json:"originalEnd"`
+	Start         time.Time  `json:"start"`
+	End           *time.Time `json:"end"`
+}
+
+type intervalCreateReq struct {
+	Start time.Time  `json:"start"`
+	End   *time.Time `json:"end"`
+}
+
+type intervalDeleteReq struct {
+	OriginalStart time.Time  `json:"originalStart"`
+	OriginalEnd   *time.Time `json:"originalEnd"`
+}
+
+// Bound on the number of operations a single PUT may carry. The 200
+// cap applies to the sum of edits+creates+deletes; deletes are cheap
+// but counting them in the cap is fine - a sane FE never submits
+// hundreds of any operation type in one click.
+const maxIntervalsPerRequest = 200
+
+// intervalErrorResp is the JSON body returned for any 4xx response
+// from PutIntervals. The FE switches its rendering based on whether
+// the Conflicts slice is populated: empty -> show plain error banner;
+// non-empty -> also render the conflict panel above the sessions list.
+type intervalErrorResp struct {
+	Error     string         `json:"error"`
+	Conflicts []conflictPair `json:"conflicts,omitempty"`
+}
+
+// conflictPair names two intervals that overlap each other in the
+// post-diff state. The FE renders one editable mini-row per row in
+// the pair; the user resolves the overlap by editing the times
+// (which auto-classifies as an edit on next submit) or deleting one.
+type conflictPair struct {
+	Rows [2]conflictRow `json:"rows"`
+}
+
+// conflictRow carries everything the FE needs to render an editable
+// row in the conflict panel AND wire it back to the submission
+// pipeline:
+//   - Kind / OriginalStart / OriginalEnd let the FE find the source
+//     row (in the main list or the staging area) and hide it so the
+//     conflict-panel duplicate becomes the single source of truth.
+//   - CurrentStart / CurrentEnd pre-fill the panel's datetime-local
+//     inputs so the user sees what they currently have.
+//
+// All timestamps are RFC3339 UTC. End fields are nullable to express
+// open intervals.
+type conflictRow struct {
+	Kind          string  `json:"kind"`
+	OriginalStart *string `json:"originalStart,omitempty"`
+	OriginalEnd   *string `json:"originalEnd,omitempty"`
+	CurrentStart  string  `json:"currentStart"`
+	CurrentEnd    *string `json:"currentEnd,omitempty"`
+}
+
+func writeIntervalError(w http.ResponseWriter, status int, msg string, conflicts []conflictPair) {
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(status)
+	_ = json.NewEncoder(w).Encode(intervalErrorResp{Error: msg, Conflicts: conflicts})
+}
+
+// httpStatusError lets the per-item validators return both a user-
+// facing message and the HTTP status (some violations are 400-class -
+// future timestamps - while others are 422-class - end before start).
+type httpStatusError struct {
+	msg    string
+	status int
+}
+
+func (e *httpStatusError) Error() string { return e.msg }
+
+// validateNewInterval performs the per-item shape checks shared by
+// creates and edits: non-zero start, start not in future, end (if
+// present) not before start AND not in future. Equal start/end is
+// permitted - datetime-local inputs are minute-granular so a real
+// sub-minute interval round-trips through the UI as start == end.
+// The opKind argument ("create N" / "edit N") is prefixed into the
+// error so the FE can map it back to a specific row.
+func validateNewInterval(start time.Time, end *time.Time, now time.Time, opKind string) (time.Time, time.Time, *httpStatusError) {
+	if start.IsZero() {
+		return time.Time{}, time.Time{}, &httpStatusError{msg: opKind + ": missing start", status: http.StatusBadRequest}
+	}
+	startUTC := start.UTC()
+	if startUTC.After(now) {
+		return time.Time{}, time.Time{}, &httpStatusError{msg: opKind + ": start is in the future", status: http.StatusBadRequest}
+	}
+	if end == nil {
+		return startUTC, time.Time{}, nil
+	}
+	endUTC := end.UTC()
+	if endUTC.Before(startUTC) {
+		return time.Time{}, time.Time{}, &httpStatusError{msg: opKind + ": end must not be earlier than start", status: http.StatusUnprocessableEntity}
+	}
+	if endUTC.After(now) {
+		return time.Time{}, time.Time{}, &httpStatusError{msg: opKind + ": end is in the future", status: http.StatusBadRequest}
+	}
+	return startUTC, endUTC, nil
+}
+
+// PutIntervals handles PUT /tasks/{id}/intervals - the retroactive
+// time-tracking editor. Body shape is a DIFF, not a snapshot:
+//
+//	{
+//	  "edits":   [{"originalStart":"...","originalEnd":"..."|null,
+//	              "start":"...","end":"..."|null}],
+//	  "creates": [{"start":"...","end":"..."|null}],
+//	  "deletes": [{"originalStart":"...","originalEnd":"..."|null}]
+//	}
+//
+// This was a snapshot in the previous design ("intervals" array =
+// the complete new state) which combined with FE pagination caused a
+// data-loss bug: a save from a page that only had loaded the first
+// 14 days silently wiped every older interval. The diff shape fixes
+// that root cause - anything the FE doesn't mention is left alone.
+//
+// Handler responsibilities:
+//   - Parse + per-item shape validation (no future, end>=start).
+//   - Look up the task to determine .IsActive() (required to decide
+//     whether an open interval is legal).
+//   - Hand off to tw.Client.UpdateIntervals which applies the diff,
+//     validates FINAL-state invariants (overlap, single-open), and
+//     writes one atomic `task import`. Cross-state validation lives
+//     there because only the diff-applied state has the full picture
+//     when the FE may have submitted a partial view.
+//
+// Response: 204 + HX-Trigger refresh on success.
+//
+// CONCURRENCY: same race window as before. An out-of-band CLI
+// invocation between this handler's Export and UpdateIntervals'
+// Export can silently lose changes. The single-record `task import`
+// is atomic per TW's docs; `task undo` rolls back the whole diff
+// (which lands as one import op) cleanly.
+func (t *Tasks) PutIntervals(w http.ResponseWriter, r *http.Request) {
+	id := r.PathValue("id")
+	if !tw.IDPattern.MatchString(id) {
+		writeIntervalError(w, http.StatusBadRequest, "invalid id", nil)
+		return
+	}
+
+	var body struct {
+		Edits   []intervalEditReq   `json:"edits"`
+		Creates []intervalCreateReq `json:"creates"`
+		Deletes []intervalDeleteReq `json:"deletes"`
+	}
+	dec := json.NewDecoder(http.MaxBytesReader(w, r.Body, 64<<10))
+	dec.DisallowUnknownFields()
+	if err := dec.Decode(&body); err != nil {
+		writeIntervalError(w, http.StatusBadRequest, "bad request: "+err.Error(), nil)
+		return
+	}
+	if dec.More() {
+		writeIntervalError(w, http.StatusBadRequest, "bad request: unexpected trailing data after JSON body", nil)
+		return
+	}
+	total := len(body.Edits) + len(body.Creates) + len(body.Deletes)
+	if total > maxIntervalsPerRequest {
+		writeIntervalError(w, http.StatusRequestEntityTooLarge, fmt.Sprintf("too many operations: %d (cap %d)", total, maxIntervalsPerRequest), nil)
+		return
+	}
+	if total == 0 {
+		// Empty diff is a no-op save - close the dialog.
+		writeRefresh(w)
+		return
+	}
+
+	now := time.Now().UTC()
+
+	creates := make([]tw.IntervalCreate, 0, len(body.Creates))
+	for i, c := range body.Creates {
+		s, stop, err := validateNewInterval(c.Start, c.End, now, fmt.Sprintf("create %d", i))
+		if err != nil {
+			writeIntervalError(w, err.status, err.Error(), nil)
+			return
+		}
+		creates = append(creates, tw.IntervalCreate{Start: s, Stop: stop})
+	}
+	edits := make([]tw.IntervalEdit, 0, len(body.Edits))
+	for i, e := range body.Edits {
+		if e.OriginalStart.IsZero() {
+			writeIntervalError(w, http.StatusBadRequest, fmt.Sprintf("edit %d: missing original start", i), nil)
+			return
+		}
+		s, stop, err := validateNewInterval(e.Start, e.End, now, fmt.Sprintf("edit %d", i))
+		if err != nil {
+			writeIntervalError(w, err.status, err.Error(), nil)
+			return
+		}
+		origEnd := time.Time{}
+		if e.OriginalEnd != nil {
+			origEnd = e.OriginalEnd.UTC()
+		}
+		edits = append(edits, tw.IntervalEdit{
+			OriginalStart: e.OriginalStart.UTC(),
+			OriginalEnd:   origEnd,
+			Start:         s,
+			Stop:          stop,
+		})
+	}
+	deletes := make([]tw.IntervalDelete, 0, len(body.Deletes))
+	for i, d := range body.Deletes {
+		if d.OriginalStart.IsZero() {
+			writeIntervalError(w, http.StatusBadRequest, fmt.Sprintf("delete %d: missing original start", i), nil)
+			return
+		}
+		origEnd := time.Time{}
+		if d.OriginalEnd != nil {
+			origEnd = d.OriginalEnd.UTC()
+		}
+		deletes = append(deletes, tw.IntervalDelete{
+			OriginalStart: d.OriginalStart.UTC(),
+			OriginalEnd:   origEnd,
+		})
+	}
+
+	tasks, err := t.TW.Export(r.Context(), id)
+	if err != nil {
+		t.Logger.Error("intervals: pre-validate export failed", "id", id, "err", err)
+		writeIntervalError(w, http.StatusInternalServerError, "task lookup failed", nil)
+		return
+	}
+	if len(tasks) != 1 {
+		writeIntervalError(w, http.StatusNotFound, "task not found", nil)
+		return
+	}
+	taskActive := tasks[0].IsActive()
+
+	plan := tw.PlanIntervalUpdate(tasks[0].Annotations, edits, creates, deletes)
+	if conflicts := detectConflicts(plan, edits, creates); len(conflicts) > 0 {
+		writeIntervalError(w, http.StatusUnprocessableEntity, "Overlapping time tracking period - please correct the highlighted entries.", conflicts)
+		return
+	}
+
+	if err := t.TW.UpdateIntervals(r.Context(), id, edits, creates, deletes, taskActive); err != nil {
+		switch {
+		case errors.Is(err, tw.ErrIntervalOverlap):
+			writeIntervalError(w, http.StatusUnprocessableEntity, "Overlapping time tracking period - please correct the highlighted entries.", nil)
+			return
+		case errors.Is(err, tw.ErrMultipleOpenIntervals):
+			writeIntervalError(w, http.StatusUnprocessableEntity, "Only one entry can be left open at a time.", nil)
+			return
+		case errors.Is(err, tw.ErrOpenIntervalRequiresActive):
+			writeIntervalError(w, http.StatusUnprocessableEntity, "An open entry requires the task to be active. Press Start tracking first.", nil)
+			return
+		case errors.Is(err, tw.ErrInvalid):
+			writeIntervalError(w, http.StatusBadRequest, "bad request: "+err.Error(), nil)
+			return
+		}
+		t.Logger.Error("intervals: update failed", "id", id, "err", err)
+		writeIntervalError(w, http.StatusInternalServerError, "interval update failed", nil)
+		return
+	}
+	writeRefresh(w)
+}
+
+// detectConflicts sweeps the post-diff plan and returns every
+// overlapping pair as a structured ConflictPair. Each row carries
+// the data the FE needs to render an editable mini-row in the
+// conflict panel and to wire it back to the corresponding row in the
+// main list / staging area.
+//
+// Sweep-line: each new interval is compared against every still-open
+// prior interval - catches non-adjacent overlaps a simple sort-and-
+// compare-neighbours pass would miss. Open intervals (zero Stop) use
+// a far-future sentinel so a later closed interval intersecting them
+// is detected.
+func detectConflicts(plan []tw.IntervalPlanItem, edits []tw.IntervalEdit, creates []tw.IntervalCreate) []conflictPair {
+	if len(plan) < 2 {
+		return nil
+	}
+	farFuture := time.Date(9999, 12, 31, 0, 0, 0, 0, time.UTC)
+	ordered := make([]tw.IntervalPlanItem, len(plan))
+	copy(ordered, plan)
+	sort.SliceStable(ordered, func(i, j int) bool { return ordered[i].Start.Before(ordered[j].Start) })
+	var pairs []conflictPair
+	type openItem struct {
+		end  time.Time
+		item tw.IntervalPlanItem
+	}
+	var open []openItem
+	for _, curr := range ordered {
+		stillOpen := open[:0]
+		for _, o := range open {
+			if curr.Start.Before(o.end) {
+				pairs = append(pairs, conflictPair{
+					Rows: [2]conflictRow{
+						planItemToConflictRow(o.item, edits, creates),
+						planItemToConflictRow(curr, edits, creates),
+					},
+				})
+				stillOpen = append(stillOpen, o)
+			}
+		}
+		open = stillOpen
+		end := curr.Stop
+		if end.IsZero() {
+			end = farFuture
+		}
+		open = append(open, openItem{end: end, item: curr})
+	}
+	return pairs
+}
+
+func planItemToConflictRow(p tw.IntervalPlanItem, edits []tw.IntervalEdit, creates []tw.IntervalCreate) conflictRow {
+	row := conflictRow{CurrentStart: p.Start.UTC().Format(time.RFC3339)}
+	if !p.Stop.IsZero() {
+		s := p.Stop.UTC().Format(time.RFC3339)
+		row.CurrentEnd = &s
+	}
+	switch p.Origin.Kind {
+	case tw.OriginCreate:
+		row.Kind = "create"
+	case tw.OriginEdit:
+		row.Kind = "edit"
+		if p.Origin.Index >= 0 && p.Origin.Index < len(edits) {
+			e := edits[p.Origin.Index]
+			os := e.OriginalStart.UTC().Format(time.RFC3339)
+			row.OriginalStart = &os
+			if !e.OriginalEnd.IsZero() {
+				oe := e.OriginalEnd.UTC().Format(time.RFC3339)
+				row.OriginalEnd = &oe
+			}
+		}
+	default:
+		row.Kind = "existing"
+		os := p.Start.UTC().Format(time.RFC3339)
+		row.OriginalStart = &os
+		if !p.Stop.IsZero() {
+			oe := p.Stop.UTC().Format(time.RFC3339)
+			row.OriginalEnd = &oe
+		}
+	}
+	return row
 }
 
 // maxBulkIDs caps the number of ids accepted in a single bulk request. The

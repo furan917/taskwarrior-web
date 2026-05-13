@@ -157,16 +157,37 @@ templ timesheetWeekCell(day TimesheetDay, now time.Time) {
 // timesheetSessionChip is the per-cell chip used in week view. Active sessions
 // (no stop time) get an amber tint; completed sessions use the neutral zinc.
 // Time range and duration are on one line to keep the chip compact.
+// Clicking opens the sessions editor scoped to this chip's day (with a
+// "Show all" toggle in the dialog to expand); from=timesheet flips the
+// dialog's header to show the back-chevron "Edit task" affordance.
 templ timesheetSessionChip(s tw.Session, now time.Time) {
-	<div class={ timesheetChipClass(s) } title={ s.Description }>
-		<div class="truncate font-medium text-zinc-800 dark:text-zinc-200">{ s.Description }</div>
-		<div class="mt-0.5 text-zinc-500 dark:text-zinc-400">{ s.Start.Local().Format("15:04") }–{ stopLabel(s, now) }</div>
-		<div class="font-medium text-zinc-600 dark:text-zinc-300">{ formatElapsed(s.Duration(now)) }</div>
-	</div>
+	<button
+		type="button"
+		class={ timesheetChipClass(s) + " block w-full text-left hover:brightness-95 dark:hover:brightness-110" }
+		title={ "Edit sessions on " + s.Start.Local().Format("Mon 2 Jan") }
+		hx-get={ sessionsEditURL(s) }
+		hx-target="#sessions-modal-slot"
+		hx-swap="innerHTML"
+	>
+		// line-clamp-2 + break-words lets the description wrap to two
+		// lines and break long unbroken strings (URLs, run-on words). The
+		// week column is narrow so a single-line truncate dropped most of
+		// the context; two lines gives ~30 chars of usable readable space.
+		<div class="line-clamp-2 break-words font-medium text-zinc-800 dark:text-zinc-200">{ s.Description }</div>
+		<div class="mt-0.5 whitespace-nowrap text-zinc-500 dark:text-zinc-400">{ s.Start.Local().Format("15:04") }-{ stopLabel(s, now) }</div>
+		<div class="whitespace-nowrap font-medium text-zinc-600 dark:text-zinc-300">{ formatElapsed(s.Duration(now)) }</div>
+	</button>
 }
 
 templ timesheetRow(s tw.Session, now time.Time) {
-	<div class={ timesheetRowClass(s) }>
+	<button
+		type="button"
+		class={ timesheetRowClass(s) + " w-full text-left cursor-pointer" }
+		hx-get={ sessionsEditURL(s) }
+		hx-target="#sessions-modal-slot"
+		hx-swap="innerHTML"
+		title="Click to edit sessions for this task"
+	>
 		<div class="min-w-0 flex-1 pr-4">
 			<span class="truncate text-sm text-zinc-800 dark:text-zinc-200">{ s.Description }</span>
 			if s.Project != "" {
@@ -174,10 +195,21 @@ templ timesheetRow(s tw.Session, now time.Time) {
 			}
 		</div>
 		<div class="flex shrink-0 items-baseline gap-3 text-xs text-zinc-500 dark:text-zinc-400">
-			<span>{ s.Start.Local().Format("15:04") }–{ stopLabel(s, now) }</span>
+			<span>{ s.Start.Local().Format("15:04") }-{ stopLabel(s, now) }</span>
 			<span class="w-14 text-right font-medium text-zinc-700 dark:text-zinc-300">{ formatElapsed(s.Duration(now)) }</span>
 		</div>
-	</div>
+	</button>
+}
+
+// sessionsEditURL builds the URL for opening the sessions editor scoped
+// to a specific session's day, with the from=timesheet flag so the
+// dialog shows the back-chevron "Edit task" affordance. UUID flows
+// straight from the parsed Session; day is the local-zone calendar day
+// (the user's day, not the UTC day).
+func sessionsEditURL(s tw.Session) string {
+	return "/forms/sessions/" + s.TaskUUID +
+		"?day=" + s.Start.Local().Format("2006-01-02") +
+		"&from=timesheet"
 }
 
 templ timesheetEmpty() {
@@ -245,16 +277,23 @@ func timesheetWeekCellClass(isToday bool) string {
 	return base + " bg-white dark:bg-zinc-900"
 }
 
+// timesheetChipClass + timesheetRowClass both stitch in the per-task
+// colour bar via border-t-2. Side-specific border-{l,t}-{colour}
+// utilities are used so the active-session amber left-border and the
+// task-identity top-border can coexist - generic `border-amber-400`
+// would set ALL sides amber and clobber the task colour.
 func timesheetChipClass(s tw.Session) string {
+	bar := taskColourBar(s.TaskUUID)
 	if s.Stop.IsZero() {
-		return "rounded border-l-2 border-amber-400 bg-amber-50 px-1.5 py-1 text-xs dark:bg-amber-950/30"
+		return "rounded border-l-2 border-l-amber-400 border-t-2 " + bar + " bg-amber-50 px-1.5 py-1 text-xs dark:bg-amber-950/30"
 	}
-	return "rounded bg-zinc-100 px-1.5 py-1 text-xs dark:bg-zinc-800"
+	return "rounded border-t-2 " + bar + " bg-zinc-100 px-1.5 py-1 text-xs dark:bg-zinc-800"
 }
 
 func timesheetRowClass(s tw.Session) string {
+	bar := taskColourBar(s.TaskUUID)
 	if s.Stop.IsZero() {
-		return "flex items-baseline justify-between rounded-sm border-l-2 border-amber-400 bg-amber-50/60 px-2 py-1 dark:bg-amber-950/20"
+		return "flex items-baseline justify-between rounded-sm border-l-2 border-l-amber-400 border-t-2 " + bar + " bg-amber-50/60 px-2 py-1 dark:bg-amber-950/20"
 	}
-	return "flex items-baseline justify-between rounded px-2 py-1 hover:bg-zinc-100 dark:hover:bg-zinc-800"
+	return "flex items-baseline justify-between rounded border-t-2 " + bar + " px-2 py-1 hover:bg-zinc-100 dark:hover:bg-zinc-800"
 }

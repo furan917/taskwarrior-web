@@ -35,7 +35,7 @@ func (v *Views) Timesheet(w http.ResponseWriter, r *http.Request) {
 
 	from, to := timesheetWindow(view, anchor)
 
-	tasks, err := v.TW.Export(ctx,
+	tasks, err := v.exportWithContext(r,
 		"(status:pending or status:waiting or status:completed)",
 		"modified.after:"+from.UTC().Format("20060102T150405Z"),
 	)

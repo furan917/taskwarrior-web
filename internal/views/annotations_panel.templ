@@ -2,6 +2,23 @@ package views
 
 import "github.com/furan917/taskwarrior-web/internal/tw"
 
+// userNotes filters out the time-tracking journal annotations (TW emits
+// "Started task" / "Stopped task" per start/stop when rc.journal.time
+// is on, which is the default) so the Notes panel shows only
+// user-authored prose. Those journal annotations are still authoritative
+// for the timesheet + Sessions editor; this is a presentation filter
+// only - no data is dropped on disk.
+func userNotes(annotations []tw.Annotation) []tw.Annotation {
+	out := make([]tw.Annotation, 0, len(annotations))
+	for _, a := range annotations {
+		if tw.IsJournalAnnotation(a.Description) {
+			continue
+		}
+		out = append(out, a)
+	}
+	return out
+}
+
 // AnnotationsPanel is the sub-section of the edit modal that shows existing
 // annotations and provides an input + button to add a new one. It's rendered
 // both as part of ModalEdit on first open AND as the response to annotate /
@@ -9,11 +26,12 @@ import "github.com/furan917/taskwarrior-web/internal/tw"
 //
 // id="annotations-panel" is the swap target for the Add / × buttons.
 templ AnnotationsPanel(t tw.Task) {
+	{{ notes := userNotes(t.Annotations) }}
 	<div id="annotations-panel" class="border-t border-zinc-200 px-4 py-3 dark:border-zinc-700">
 		<h3 class="mb-2 text-sm font-semibold text-zinc-700 dark:text-zinc-300">Notes</h3>
-		if len(t.Annotations) > 0 {
+		if len(notes) > 0 {
 			<ul class="mb-3 space-y-1.5">
-				for _, a := range t.Annotations {
+				for _, a := range notes {
 					<li class="flex items-start gap-2 text-sm">
 						<time class="mt-0.5 w-32 shrink-0 text-xs text-zinc-500 dark:text-zinc-400">{ humanDateTime(a.Entry) }</time>
 						<span class="flex-1 text-zinc-800 dark:text-zinc-200">

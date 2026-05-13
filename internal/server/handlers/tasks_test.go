@@ -1,12 +1,14 @@
 package handlers
 
 import (
+	"encoding/json"
 	"net/http"
 	"net/http/httptest"
 	"os"
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/furan917/taskwarrior-web/internal/tw"
 )
@@ -1178,4 +1180,651 @@ func TestTasks_Undo_PassesUndoArg(t *testing.T) {
 	if !foundUndo {
 		t.Errorf("expected `undo` in argv: %v", logged)
 	}
+}
+
+// ── PutIntervals (retroactive time-tracking editor) ─────────────────────────
+
+// putIntervalsTaskFixture returns a fake `task` script body that
+// exports a fixture pending task and captures any `task import -`
+// stdin to the named path. activeTaskFlag adds the `start` field so
+// task.IsActive() reports true (needed for open-interval validation
+// tests). annotationsJSON is a JSON array literal of starting
+// annotations; pass "[]" for "no history" or seed it for the data-
+// loss regression tests that need to confirm pre-existing pairs
+// survive a partial-view diff.
+func putIntervalsTaskFixture(captured string, activeTaskFlag bool, annotationsJSON string) string {
+	startField := ""
+	if activeTaskFlag {
+		startField = `"start": "20260512T080000Z",`
+	}
+	if annotationsJSON == "" {
+		annotationsJSON = "[]"
+	}
+	// 30d-old entry so most start timestamps the tests pass are after it.
+	return `#!/bin/sh
+case "$*" in
+  *export*)
+    cat <<JSON
+[{
+  "id": 1,
+  "uuid": "11111111-2222-3333-4444-555555555555",
+  "description": "fixture",
+  "status": "pending",
+  "entry": "20260412T120000Z",
+  ` + startField + `
+  "annotations": ` + annotationsJSON + `
+}]
+JSON
+    ;;
+  *import*)
+    cat - > '` + captured + `'
+    ;;
+esac
+exit 0
+`
+}
+
+// putIntervalsRequest builds a JSON request body for PUT /tasks/{id}/intervals
+// from a literal struct slice. Tests stay readable.
+func putIntervalsRequest(t *testing.T, body any) *http.Request {
+	t.Helper()
+	raw, err := json.Marshal(body)
+	if err != nil {
+		t.Fatalf("marshal request: %v", err)
+	}
+	req := httptest.NewRequest(http.MethodPut, "/tasks/11111111-2222-3333-4444-555555555555/intervals", strings.NewReader(string(raw)))
+	req.SetPathValue("id", "11111111-2222-3333-4444-555555555555")
+	req.Header.Set("Content-Type", "application/json")
+	return req
+}
+
+// installPutIntervalsFake provisions a fake `task` with NO existing
+// annotations and returns the captured-import path. Used by tests
+// that only care about the request/validation surface, not the
+// preserve-existing-pairs contract.
+func installPutIntervalsFake(t *testing.T, active bool) string {
+	t.Helper()
+	captured := filepath.Join(t.TempDir(), "import.json")
+	installScript(t, putIntervalsTaskFixture(captured, active, "[]"))
+	return captured
+}
+
+// installPutIntervalsFakeWithAnns is the seeded-history variant: the
+// fixture starts with the supplied journal annotations so a partial-
+// view diff can be checked for non-destructiveness against existing
+// pairs.
+func installPutIntervalsFakeWithAnns(t *testing.T, active bool, annotationsJSON string) string {
+	t.Helper()
+	captured := filepath.Join(t.TempDir(), "import.json")
+	installScript(t, putIntervalsTaskFixture(captured, active, annotationsJSON))
+	return captured
+}
+
+// installScript shim - mirrors the tw package helper. Lives here so the
+// handler tests don't reach across package boundaries.
+func installScript(t *testing.T, body string) {
+	t.Helper()
+	dir := t.TempDir()
+	path := filepath.Join(dir, "task")
+	if err := os.WriteFile(path, []byte(body), 0o755); err != nil {
+		t.Fatalf("write script: %v", err)
+	}
+	t.Setenv("PATH", dir+string(os.PathListSeparator)+os.Getenv("PATH"))
+}
+
+// TestPutIntervals_HappyPath_CreateOnly: a diff with one create lands
+// as one Started/Stopped annotation pair in the imported JSON, plus
+// any existing annotations carry through.
+func TestPutIntervals_HappyPath_CreateOnly(t *testing.T) {
+	captured := installPutIntervalsFake(t, false)
+	tk := newTasks()
+	now := time.Now().UTC().Truncate(time.Minute)
+	body := map[string]any{
+		"creates": []map[string]any{
+			{"start": now.Add(-2 * time.Hour).Format(time.RFC3339), "end": now.Add(-1 * time.Hour).Format(time.RFC3339)},
+		},
+	}
+	rr := httptest.NewRecorder()
+	tk.PutIntervals(rr, putIntervalsRequest(t, body))
+	if rr.Code != http.StatusNoContent {
+		t.Fatalf("status: got %d want 204; body=%s", rr.Code, rr.Body.String())
+	}
+	if rr.Header().Get("HX-Trigger") != "refresh" {
+		t.Errorf("HX-Trigger: got %q want refresh", rr.Header().Get("HX-Trigger"))
+	}
+	imported := readImportedTaskAnns(t, captured)
+	if len(imported) != 2 {
+		t.Fatalf("expected 2 annotations (1 create pair); got %+v", imported)
+	}
+}
+
+// TestPutIntervals_HappyPath_EditOnly verifies an edit against a seeded
+// fixture: the original pair is replaced by the new times, no creates,
+// no deletes.
+func TestPutIntervals_HappyPath_EditOnly(t *testing.T) {
+	seed := `[
+		{"entry": "20260420T090000Z", "description": "Started task"},
+		{"entry": "20260420T100000Z", "description": "Stopped task"}
+	]`
+	captured := installPutIntervalsFakeWithAnns(t, false, seed)
+	tk := newTasks()
+	body := map[string]any{
+		"edits": []map[string]any{{
+			"originalStart": "2026-04-20T09:00:00Z",
+			"originalEnd":   "2026-04-20T10:00:00Z",
+			"start":         "2026-04-20T09:00:00Z",
+			"end":           "2026-04-20T11:00:00Z",
+		}},
+	}
+	rr := httptest.NewRecorder()
+	tk.PutIntervals(rr, putIntervalsRequest(t, body))
+	if rr.Code != http.StatusNoContent {
+		t.Fatalf("status: got %d want 204; body=%s", rr.Code, rr.Body.String())
+	}
+	imported := readImportedTaskAnns(t, captured)
+	if len(imported) != 2 {
+		t.Fatalf("expected 2 annotations after edit; got %+v", imported)
+	}
+	sawNewStop := false
+	for _, a := range imported {
+		if a.Entry == "20260420T100000Z" {
+			t.Errorf("original Stop entry survived; should have been replaced: %+v", a)
+		}
+		if a.Entry == "20260420T110000Z" && a.Description == tw.JournalStopDescription {
+			sawNewStop = true
+		}
+	}
+	if !sawNewStop {
+		t.Errorf("edit's new stop annotation missing from import")
+	}
+}
+
+// TestPutIntervals_PreservesUnsubmittedExistingRow is THE regression
+// test for the data-loss bug that motivated this whole refactor.
+// Seed two existing pairs. Submit a diff that only edits the FIRST
+// pair. The SECOND pair must survive in the import payload (under
+// the old full-replace it would have been silently destroyed).
+func TestPutIntervals_PreservesUnsubmittedExistingRow(t *testing.T) {
+	seed := `[
+		{"entry": "20260420T090000Z", "description": "Started task"},
+		{"entry": "20260420T100000Z", "description": "Stopped task"},
+		{"entry": "20260421T140000Z", "description": "Started task"},
+		{"entry": "20260421T150000Z", "description": "Stopped task"}
+	]`
+	captured := installPutIntervalsFakeWithAnns(t, false, seed)
+	tk := newTasks()
+	// FE only "sees" the 2026-04-20 pair on its loaded page. It edits
+	// that pair and submits. The 2026-04-21 pair (on a page the FE
+	// hasn't loaded) is NOT in the submission.
+	body := map[string]any{
+		"edits": []map[string]any{{
+			"originalStart": "2026-04-20T09:00:00Z",
+			"originalEnd":   "2026-04-20T10:00:00Z",
+			"start":         "2026-04-20T09:00:00Z",
+			"end":           "2026-04-20T10:30:00Z",
+		}},
+	}
+	rr := httptest.NewRecorder()
+	tk.PutIntervals(rr, putIntervalsRequest(t, body))
+	if rr.Code != http.StatusNoContent {
+		t.Fatalf("status: got %d want 204; body=%s", rr.Code, rr.Body.String())
+	}
+	imported := readImportedTaskAnns(t, captured)
+	// 4 annotations expected: edited pair (2) + untouched pair (2).
+	if len(imported) != 4 {
+		t.Fatalf("partial-view diff destroyed unsubmitted pair; got %d annotations want 4: %+v", len(imported), imported)
+	}
+	saw0421Start, saw0421Stop := false, false
+	for _, a := range imported {
+		if a.Entry == "20260421T140000Z" && a.Description == tw.JournalStartDescription {
+			saw0421Start = true
+		}
+		if a.Entry == "20260421T150000Z" && a.Description == tw.JournalStopDescription {
+			saw0421Stop = true
+		}
+	}
+	if !saw0421Start || !saw0421Stop {
+		t.Errorf("untouched 2026-04-21 pair missing from import - the data-loss bug returned: %+v", imported)
+	}
+}
+
+// TestPutIntervals_HappyPath_DeleteOnly: a diff with one delete
+// removes the matching pair and leaves nothing else changed.
+func TestPutIntervals_HappyPath_DeleteOnly(t *testing.T) {
+	seed := `[
+		{"entry": "20260420T090000Z", "description": "Started task"},
+		{"entry": "20260420T100000Z", "description": "Stopped task"}
+	]`
+	captured := installPutIntervalsFakeWithAnns(t, false, seed)
+	tk := newTasks()
+	body := map[string]any{
+		"deletes": []map[string]any{{
+			"originalStart": "2026-04-20T09:00:00Z",
+			"originalEnd":   "2026-04-20T10:00:00Z",
+		}},
+	}
+	rr := httptest.NewRecorder()
+	tk.PutIntervals(rr, putIntervalsRequest(t, body))
+	if rr.Code != http.StatusNoContent {
+		t.Fatalf("status: got %d want 204; body=%s", rr.Code, rr.Body.String())
+	}
+	imported := readImportedTaskAnns(t, captured)
+	if len(imported) != 0 {
+		t.Errorf("delete should leave 0 annotations; got %+v", imported)
+	}
+}
+
+// TestPutIntervals_EmptyDiffShortCircuitsTo204: an empty body
+// (nothing in any of edits/creates/deletes) is a no-op save. The
+// handler returns 204 without exporting or importing - useful when
+// the user opens the editor and clicks Save without touching
+// anything.
+func TestPutIntervals_EmptyDiffShortCircuitsTo204(t *testing.T) {
+	captured := installPutIntervalsFake(t, false)
+	tk := newTasks()
+	body := map[string]any{}
+	rr := httptest.NewRecorder()
+	tk.PutIntervals(rr, putIntervalsRequest(t, body))
+	if rr.Code != http.StatusNoContent {
+		t.Fatalf("status: got %d want 204; body=%s", rr.Code, rr.Body.String())
+	}
+	// The fake's import branch should never have run.
+	if _, err := os.Stat(captured); err == nil {
+		t.Errorf("empty diff should not trigger an import; captured file exists")
+	}
+}
+
+// TestPutIntervals_RejectsBadID: ID must match tw.IDPattern; trash
+// names short-circuit at 400 before any TW work.
+func TestPutIntervals_RejectsBadID(t *testing.T) {
+	tk := newTasks()
+	req := httptest.NewRequest(http.MethodPut, "/tasks/x/intervals", strings.NewReader(`{}`))
+	req.SetPathValue("id", "../bad")
+	rr := httptest.NewRecorder()
+	tk.PutIntervals(rr, req)
+	if rr.Code != http.StatusBadRequest {
+		t.Errorf("got %d want 400", rr.Code)
+	}
+}
+
+// TestPutIntervals_RejectsEndBeforeStart_OnCreate: 422. End < start
+// is the most common user-error case. Applies equally to creates.
+func TestPutIntervals_RejectsEndBeforeStart_OnCreate(t *testing.T) {
+	installPutIntervalsFake(t, false)
+	tk := newTasks()
+	now := time.Now().UTC().Truncate(time.Minute)
+	body := map[string]any{
+		"creates": []map[string]any{
+			{"start": now.Add(-1 * time.Hour).Format(time.RFC3339), "end": now.Add(-2 * time.Hour).Format(time.RFC3339)},
+		},
+	}
+	rr := httptest.NewRecorder()
+	tk.PutIntervals(rr, putIntervalsRequest(t, body))
+	if rr.Code != http.StatusUnprocessableEntity {
+		t.Errorf("got %d want 422; body=%s", rr.Code, rr.Body.String())
+	}
+}
+
+// TestPutIntervals_RejectsEndBeforeStart_OnEdit: same shape check
+// runs for the new values on an edit.
+func TestPutIntervals_RejectsEndBeforeStart_OnEdit(t *testing.T) {
+	installPutIntervalsFake(t, false)
+	tk := newTasks()
+	now := time.Now().UTC().Truncate(time.Minute)
+	body := map[string]any{
+		"edits": []map[string]any{{
+			"originalStart": now.Add(-3 * time.Hour).Format(time.RFC3339),
+			"originalEnd":   now.Add(-2 * time.Hour).Format(time.RFC3339),
+			"start":         now.Add(-1 * time.Hour).Format(time.RFC3339),
+			"end":           now.Add(-2 * time.Hour).Format(time.RFC3339),
+		}},
+	}
+	rr := httptest.NewRecorder()
+	tk.PutIntervals(rr, putIntervalsRequest(t, body))
+	if rr.Code != http.StatusUnprocessableEntity {
+		t.Errorf("got %d want 422; body=%s", rr.Code, rr.Body.String())
+	}
+}
+
+// TestPutIntervals_RejectsFutureEnd: 400. End in the future has no
+// meaningful interpretation for tracked time.
+func TestPutIntervals_RejectsFutureEnd(t *testing.T) {
+	installPutIntervalsFake(t, false)
+	tk := newTasks()
+	now := time.Now().UTC().Truncate(time.Minute)
+	body := map[string]any{
+		"creates": []map[string]any{
+			{"start": now.Add(-1 * time.Hour).Format(time.RFC3339), "end": now.Add(2 * time.Hour).Format(time.RFC3339)},
+		},
+	}
+	rr := httptest.NewRecorder()
+	tk.PutIntervals(rr, putIntervalsRequest(t, body))
+	if rr.Code != http.StatusBadRequest {
+		t.Errorf("got %d want 400; body=%s", rr.Code, rr.Body.String())
+	}
+}
+
+// TestPutIntervals_RejectsFutureStart: 400. Start in the future
+// would imply tracking work that hasn't happened.
+func TestPutIntervals_RejectsFutureStart(t *testing.T) {
+	installPutIntervalsFake(t, false)
+	tk := newTasks()
+	now := time.Now().UTC().Truncate(time.Minute)
+	body := map[string]any{
+		"creates": []map[string]any{
+			{"start": now.Add(time.Hour).Format(time.RFC3339), "end": now.Add(2 * time.Hour).Format(time.RFC3339)},
+		},
+	}
+	rr := httptest.NewRecorder()
+	tk.PutIntervals(rr, putIntervalsRequest(t, body))
+	if rr.Code != http.StatusBadRequest {
+		t.Errorf("got %d want 400; body=%s", rr.Code, rr.Body.String())
+	}
+}
+
+// TestPutIntervals_RejectsOverlapBetweenCreates: 422 when two creates
+// in the same submission overlap.
+func TestPutIntervals_RejectsOverlapBetweenCreates(t *testing.T) {
+	installPutIntervalsFake(t, false)
+	tk := newTasks()
+	now := time.Now().UTC().Truncate(time.Minute)
+	body := map[string]any{
+		"creates": []map[string]any{
+			{"start": now.Add(-3 * time.Hour).Format(time.RFC3339), "end": now.Add(-1 * time.Hour).Format(time.RFC3339)},
+			{"start": now.Add(-2 * time.Hour).Format(time.RFC3339), "end": now.Add(-30 * time.Minute).Format(time.RFC3339)},
+		},
+	}
+	rr := httptest.NewRecorder()
+	tk.PutIntervals(rr, putIntervalsRequest(t, body))
+	if rr.Code != http.StatusUnprocessableEntity {
+		t.Errorf("got %d want 422; body=%s", rr.Code, rr.Body.String())
+	}
+}
+
+// intervalErrorResp mirrors the handler's response shape so tests can
+// decode it without importing the unexported type from the package.
+type intervalErrorRespTest struct {
+	Error     string `json:"error"`
+	Conflicts []struct {
+		Rows [2]struct {
+			Kind          string  `json:"kind"`
+			OriginalStart *string `json:"originalStart,omitempty"`
+			OriginalEnd   *string `json:"originalEnd,omitempty"`
+			CurrentStart  string  `json:"currentStart"`
+			CurrentEnd    *string `json:"currentEnd,omitempty"`
+		} `json:"rows"`
+	} `json:"conflicts,omitempty"`
+}
+
+func decodeIntervalError(t *testing.T, rr *httptest.ResponseRecorder) intervalErrorRespTest {
+	t.Helper()
+	var resp intervalErrorRespTest
+	if err := json.Unmarshal(rr.Body.Bytes(), &resp); err != nil {
+		t.Fatalf("decode error response: %v\nbody=%s", err, rr.Body.String())
+	}
+	return resp
+}
+
+// TestPutIntervals_ReportsAllConflicts verifies that a save against a
+// task with multiple pre-existing overlap clusters returns every
+// conflict pair in one response - the FE renders all of them in the
+// conflict panel so the user resolves everything in a single pass.
+func TestPutIntervals_ReportsAllConflicts(t *testing.T) {
+	seed := `[
+		{"entry": "20260408T140000Z", "description": "Started task"},
+		{"entry": "20260408T150000Z", "description": "Started task"},
+		{"entry": "20260408T153000Z", "description": "Stopped task"},
+		{"entry": "20260408T153001Z", "description": "Stopped task"},
+		{"entry": "20260413T160000Z", "description": "Started task"},
+		{"entry": "20260413T170000Z", "description": "Started task"},
+		{"entry": "20260413T171500Z", "description": "Stopped task"},
+		{"entry": "20260413T173000Z", "description": "Stopped task"}
+	]`
+	installPutIntervalsFakeWithAnns(t, false, seed)
+	tk := newTasks()
+	rr := httptest.NewRecorder()
+	tk.PutIntervals(rr, putIntervalsRequest(t, map[string]any{
+		"creates": []map[string]any{
+			{"start": "2026-05-01T10:00:00Z", "end": "2026-05-01T11:00:00Z"},
+		},
+	}))
+	if rr.Code != http.StatusUnprocessableEntity {
+		t.Fatalf("got %d want 422; body=%s", rr.Code, rr.Body.String())
+	}
+	if ct := rr.Header().Get("Content-Type"); ct != "application/json" {
+		t.Errorf("Content-Type: got %q want application/json", ct)
+	}
+	resp := decodeIntervalError(t, rr)
+	if resp.Error == "" {
+		t.Error("error field missing")
+	}
+	if len(resp.Conflicts) < 2 {
+		t.Errorf("expected at least 2 conflict pairs, got %d: %+v", len(resp.Conflicts), resp.Conflicts)
+	}
+	// Each pair's two rows both have kind=existing for this fixture
+	// (no edits / creates in the diff that overlap; all overlaps are
+	// between pre-existing pairs).
+	for i, pair := range resp.Conflicts {
+		for j, row := range pair.Rows {
+			if row.Kind != "existing" {
+				t.Errorf("conflict[%d].rows[%d].kind: got %q want existing", i, j, row.Kind)
+			}
+			if row.OriginalStart == nil || row.CurrentStart == "" {
+				t.Errorf("conflict[%d].rows[%d]: existing rows must carry both originalStart and currentStart; got %+v", i, j, row)
+			}
+		}
+	}
+}
+
+// TestPutIntervals_ConflictRowsCarryEditIdentity confirms that when
+// an edit is involved in a conflict, the response row carries the
+// edit's original timestamps (so the FE can find the source row in
+// the main list) plus its current submitted values (so the conflict-
+// panel input pre-fills with what the user actually typed).
+func TestPutIntervals_ConflictRowsCarryEditIdentity(t *testing.T) {
+	seed := `[
+		{"entry": "20260420T090000Z", "description": "Started task"},
+		{"entry": "20260420T100000Z", "description": "Stopped task"},
+		{"entry": "20260420T110000Z", "description": "Started task"},
+		{"entry": "20260420T120000Z", "description": "Stopped task"}
+	]`
+	installPutIntervalsFakeWithAnns(t, false, seed)
+	tk := newTasks()
+	// Edit the first pair to overlap the second.
+	rr := httptest.NewRecorder()
+	tk.PutIntervals(rr, putIntervalsRequest(t, map[string]any{
+		"edits": []map[string]any{{
+			"originalStart": "2026-04-20T09:00:00Z",
+			"originalEnd":   "2026-04-20T10:00:00Z",
+			"start":         "2026-04-20T09:00:00Z",
+			"end":           "2026-04-20T11:30:00Z",
+		}},
+	}))
+	if rr.Code != http.StatusUnprocessableEntity {
+		t.Fatalf("got %d want 422; body=%s", rr.Code, rr.Body.String())
+	}
+	resp := decodeIntervalError(t, rr)
+	if len(resp.Conflicts) != 1 {
+		t.Fatalf("expected 1 conflict pair, got %d", len(resp.Conflicts))
+	}
+	var sawEdit, sawExisting bool
+	for _, row := range resp.Conflicts[0].Rows {
+		switch row.Kind {
+		case "edit":
+			sawEdit = true
+			if row.OriginalStart == nil || *row.OriginalStart != "2026-04-20T09:00:00Z" {
+				t.Errorf("edit row missing/wrong originalStart: %+v", row)
+			}
+			if row.CurrentStart != "2026-04-20T09:00:00Z" || row.CurrentEnd == nil || *row.CurrentEnd != "2026-04-20T11:30:00Z" {
+				t.Errorf("edit row currentStart/End wrong: %+v", row)
+			}
+		case "existing":
+			sawExisting = true
+		}
+	}
+	if !sawEdit || !sawExisting {
+		t.Errorf("expected one edit + one existing row; got %+v", resp.Conflicts[0].Rows)
+	}
+}
+
+// TestPutIntervals_RejectsOverlapWithExistingUnsubmittedRow is the
+// regression test for the cross-page overlap case that the old full-
+// replace handler couldn't detect. The FE only knows about row N on
+// its loaded page; the BE knows about ALL rows because it does its
+// own export. A new create that overlaps with an existing pair on
+// some unloaded page must still be rejected.
+func TestPutIntervals_RejectsOverlapWithExistingUnsubmittedRow(t *testing.T) {
+	seed := `[
+		{"entry": "20260420T090000Z", "description": "Started task"},
+		{"entry": "20260420T110000Z", "description": "Stopped task"}
+	]`
+	installPutIntervalsFakeWithAnns(t, false, seed)
+	tk := newTasks()
+	body := map[string]any{
+		"creates": []map[string]any{
+			// Overlaps the existing 09:00-11:00 pair which the FE
+			// never submitted.
+			{"start": "2026-04-20T10:00:00Z", "end": "2026-04-20T12:00:00Z"},
+		},
+	}
+	rr := httptest.NewRecorder()
+	tk.PutIntervals(rr, putIntervalsRequest(t, body))
+	if rr.Code != http.StatusUnprocessableEntity {
+		t.Errorf("got %d want 422; body=%s", rr.Code, rr.Body.String())
+	}
+}
+
+// TestPutIntervals_AllowsStartBeforeEntry confirms the retroactive
+// nature of the editor: a session that starts before the task's
+// creation timestamp is a legitimate use case (logged-after-the-fact
+// work), and the validator must let it through.
+func TestPutIntervals_AllowsStartBeforeEntry(t *testing.T) {
+	installPutIntervalsFake(t, false) // fixture entry: 20260412T120000Z
+	tk := newTasks()
+	body := map[string]any{
+		"creates": []map[string]any{
+			{"start": "2026-01-01T10:00:00Z", "end": "2026-01-01T11:00:00Z"},
+		},
+	}
+	rr := httptest.NewRecorder()
+	tk.PutIntervals(rr, putIntervalsRequest(t, body))
+	if rr.Code != http.StatusNoContent {
+		t.Errorf("got %d want 204 (retroactive starts must be allowed); body=%s", rr.Code, rr.Body.String())
+	}
+}
+
+// TestPutIntervals_RejectsOpenIntervalOnInactiveTask: an open pair
+// (end:null) is only legal when the task itself is being tracked.
+// Otherwise the dangling Started annotation has no matching Stopped.
+func TestPutIntervals_RejectsOpenIntervalOnInactiveTask(t *testing.T) {
+	installPutIntervalsFake(t, false) // inactive
+	tk := newTasks()
+	now := time.Now().UTC().Truncate(time.Minute)
+	body := map[string]any{
+		"creates": []map[string]any{
+			{"start": now.Add(-1 * time.Hour).Format(time.RFC3339), "end": nil},
+		},
+	}
+	rr := httptest.NewRecorder()
+	tk.PutIntervals(rr, putIntervalsRequest(t, body))
+	if rr.Code != http.StatusUnprocessableEntity {
+		t.Errorf("got %d want 422; body=%s", rr.Code, rr.Body.String())
+	}
+}
+
+// TestPutIntervals_AcceptsOpenIntervalOnActiveTask: dual of the
+// previous test - task is active so the open create is accepted.
+func TestPutIntervals_AcceptsOpenIntervalOnActiveTask(t *testing.T) {
+	captured := installPutIntervalsFake(t, true) // active
+	tk := newTasks()
+	now := time.Now().UTC().Truncate(time.Minute)
+	body := map[string]any{
+		"creates": []map[string]any{
+			{"start": now.Add(-1 * time.Hour).Format(time.RFC3339), "end": nil},
+		},
+	}
+	rr := httptest.NewRecorder()
+	tk.PutIntervals(rr, putIntervalsRequest(t, body))
+	if rr.Code != http.StatusNoContent {
+		t.Fatalf("got %d want 204; body=%s", rr.Code, rr.Body.String())
+	}
+	imported := readImportedTaskAnns(t, captured)
+	if len(imported) != 1 || imported[0].Description != tw.JournalStartDescription {
+		t.Errorf("expected exactly one Started annotation; got %+v", imported)
+	}
+}
+
+// TestPutIntervals_AcceptsEndEqualToStart: a sub-minute interval
+// round-trips through the minute-granular UI as end == start. Must
+// be permitted.
+func TestPutIntervals_AcceptsEndEqualToStart(t *testing.T) {
+	installPutIntervalsFake(t, false)
+	tk := newTasks()
+	when := time.Now().UTC().Truncate(time.Minute).Add(-time.Hour)
+	body := map[string]any{
+		"creates": []map[string]any{
+			{"start": when.Format(time.RFC3339), "end": when.Format(time.RFC3339)},
+		},
+	}
+	rr := httptest.NewRecorder()
+	tk.PutIntervals(rr, putIntervalsRequest(t, body))
+	if rr.Code != http.StatusNoContent {
+		t.Errorf("got %d want 204 (end==start permitted); body=%s", rr.Code, rr.Body.String())
+	}
+}
+
+// TestPutIntervals_RejectsTrailingJunk: dec.More() guard against
+// extra bytes after the JSON object.
+func TestPutIntervals_RejectsTrailingJunk(t *testing.T) {
+	installPutIntervalsFake(t, false)
+	tk := newTasks()
+	body := `{"creates":[]}{"creates":[]}`
+	req := httptest.NewRequest(http.MethodPut, "/tasks/11111111-2222-3333-4444-555555555555/intervals", strings.NewReader(body))
+	req.SetPathValue("id", "11111111-2222-3333-4444-555555555555")
+	req.Header.Set("Content-Type", "application/json")
+	rr := httptest.NewRecorder()
+	tk.PutIntervals(rr, req)
+	if rr.Code != http.StatusBadRequest {
+		t.Errorf("got %d want 400; body=%s", rr.Code, rr.Body.String())
+	}
+}
+
+// TestPutIntervals_413OnTooMany: cap is 200 operations summed across
+// edits/creates/deletes per request.
+func TestPutIntervals_413OnTooMany(t *testing.T) {
+	installPutIntervalsFake(t, false)
+	tk := newTasks()
+	now := time.Now().UTC().Truncate(time.Minute)
+	creates := make([]map[string]any, 0, 201)
+	for i := 0; i < 201; i++ {
+		s := now.Add(-time.Duration(i*2+10) * time.Minute)
+		e := s.Add(1 * time.Minute)
+		creates = append(creates, map[string]any{"start": s.Format(time.RFC3339), "end": e.Format(time.RFC3339)})
+	}
+	body := map[string]any{"creates": creates}
+	rr := httptest.NewRecorder()
+	tk.PutIntervals(rr, putIntervalsRequest(t, body))
+	if rr.Code != http.StatusRequestEntityTooLarge {
+		t.Errorf("got %d want 413; body=%s", rr.Code, rr.Body.String())
+	}
+}
+
+// readImportedTaskAnns reads the captured stdin from the fake `task`
+// and returns the annotations of the single imported record. Used
+// throughout the PutIntervals tests where we care about the WRITTEN
+// annotations not the request/response shape.
+func readImportedTaskAnns(t *testing.T, captured string) []tw.Annotation {
+	t.Helper()
+	raw, err := os.ReadFile(captured)
+	if err != nil {
+		t.Fatalf("read captured import: %v", err)
+	}
+	var imported []tw.Task
+	if err := json.Unmarshal(raw, &imported); err != nil {
+		t.Fatalf("unmarshal captured: %v", err)
+	}
+	if len(imported) != 1 {
+		t.Fatalf("expected exactly 1 imported task, got %d", len(imported))
+	}
+	return imported[0].Annotations
 }

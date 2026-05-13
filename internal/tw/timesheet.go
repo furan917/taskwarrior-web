@@ -6,6 +6,47 @@ import (
 	"time"
 )
 
+// Canonical Taskwarrior 3.x journal-time annotation descriptions. The READ
+// path in ParseSessions also accepts TW 2.x "Started <timestamp>" / "Stopped
+// <timestamp>" forms for back-compat, but the WRITE path (ReplaceIntervals)
+// only emits the canonical 3.x form. Hardcoded as constants (NOT user input)
+// because the writer's annotation-description field MUST be a fixed Go value
+// so a future bug can't smuggle attacker-controlled text into a write.
+const (
+	JournalStartDescription = "Started task"
+	JournalStopDescription  = "Stopped task"
+)
+
+// IsJournalAnnotation reports whether an annotation description belongs
+// to the time-tracking journal (any era). ReplaceIntervals uses this to
+// STRIP existing journal annotations before re-emitting from the FE's
+// intervals; the Notes panel in the edit modal uses it to HIDE journal
+// annotations from the user-facing notes list (otherwise dozens of
+// "Started task"/"Stopped task" rows from time tracking pollute what
+// should only carry the user's own scribbles).
+//
+// Exported because both the tw and views layers need the same predicate
+// and forking the regex would invite drift.
+func IsJournalAnnotation(desc string) bool {
+	desc = strings.TrimSpace(desc)
+	switch {
+	case desc == JournalStartDescription || strings.HasPrefix(desc, JournalStartDescription+" "):
+		return true
+	case desc == JournalStopDescription || strings.HasPrefix(desc, JournalStopDescription+" "):
+		return true
+	case strings.HasPrefix(desc, "Started "):
+		// TW 2.x: "Started <timestamp>". Match conservatively: only when
+		// the suffix parses as a timestamp, so a user annotation like
+		// "Started the conversation" passes through unchanged.
+		_, ok := parseJournalTimestamp(desc, "Started ")
+		return ok
+	case strings.HasPrefix(desc, "Stopped "):
+		_, ok := parseJournalTimestamp(desc, "Stopped ")
+		return ok
+	}
+	return false
+}
+
 // Session is one continuous work block on a task: a start time and either a
 // stop time (non-zero) or an ongoing session (Stop.IsZero() == true when the
 // task is still active).
@@ -75,8 +116,13 @@ func ParseSessions(t Task, now time.Time) []Session {
 	var sessions []Session
 	si := 0
 	for _, start := range starts {
-		// Advance past stops that precede this start (orphaned stops).
-		for si < len(stops) && !stops[si].After(start) {
+		// Advance past stops STRICTLY before this start - orphaned
+		// stops. A stop AT the same instant as a start is treated as
+		// a valid (zero-duration) pairing rather than an orphan: the
+		// editor's minute-granular datetime-local input can produce
+		// genuine same-instant Started/Stopped pairs for sub-minute
+		// real intervals, and round-tripping must be lossless.
+		for si < len(stops) && stops[si].Before(start) {
 			si++
 		}
 
