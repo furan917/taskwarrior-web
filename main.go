@@ -17,8 +17,8 @@ import (
 
 	"gopkg.in/natefinch/lumberjack.v2"
 
-	"github.com/furan917/taskwarrior-web/internal/config"
-	"github.com/furan917/taskwarrior-web/internal/server"
+	"github.com/furan917/taskwarrior-web-portal/internal/config"
+	"github.com/furan917/taskwarrior-web-portal/internal/server"
 )
 
 // addrPort returns the trailing port from a "host:port" string. Used only
@@ -81,12 +81,12 @@ func checkDataDir(logger *slog.Logger) error {
 // install summary lies about where logs actually land.
 func logDirFor(goos, home, xdgStateHome string) string {
 	if goos == "darwin" {
-		return filepath.Join(home, "Library", "Logs", "taskwarrior-web")
+		return filepath.Join(home, "Library", "Logs", "taskwarrior-web-portal")
 	}
 	if xdgStateHome != "" {
-		return filepath.Join(xdgStateHome, "taskwarrior-web")
+		return filepath.Join(xdgStateHome, "taskwarrior-web-portal")
 	}
-	return filepath.Join(home, ".local", "state", "taskwarrior-web")
+	return filepath.Join(home, ".local", "state", "taskwarrior-web-portal")
 }
 
 // logDirForOS is the production wrapper that snapshots the live runtime.GOOS
@@ -141,7 +141,7 @@ func main() {
 		if errors.Is(err, syscall.EADDRINUSE) {
 			logger.Error("port already in use",
 				"addr", config.Addr,
-				"hint", "another taskwarrior-web instance? `lsof -nP -iTCP:"+addrPort(config.Addr)+"`")
+				"hint", "another taskwarrior-web-portal instance? `lsof -nP -iTCP:"+addrPort(config.Addr)+"`")
 			os.Exit(1)
 		}
 		logger.Error("server init failed", "err", err)

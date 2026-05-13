@@ -1,4 +1,4 @@
-# air config for taskwarrior-web dev hot-reload.
+# air config for taskwarrior-web-portal dev hot-reload.
 # See `make dev` — runs alongside `tailwindcss --watch` so two long-running
 # watchers don't serialise behind each other.
 
@@ -9,8 +9,8 @@ tmp_dir = "tmp"
   # Always run templ generate before go build; otherwise edits to .templ files
   # don't propagate. The exclude_regex below prevents templ output from
   # re-triggering this command in a loop.
-  cmd = "templ generate && go build -o ./tmp/taskwarrior-web ."
-  bin = "./tmp/taskwarrior-web"
+  cmd = "templ generate && go build -o ./tmp/taskwarrior-web-portal ."
+  bin = "./tmp/taskwarrior-web-portal"
   full_bin = ""
   args_bin = []
   include_ext = ["go", "templ", "html"]

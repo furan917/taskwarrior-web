@@ -5,8 +5,8 @@ import (
 	"testing"
 	"time"
 
-	"github.com/furan917/taskwarrior-web/internal/tw"
-	"github.com/furan917/taskwarrior-web/internal/views"
+	"github.com/furan917/taskwarrior-web-portal/internal/tw"
+	"github.com/furan917/taskwarrior-web-portal/internal/views"
 )
 
 // twTime formats t as a Taskwarrior YYYYMMDDTHHMMSSZ string in UTC. It's a

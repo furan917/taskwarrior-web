@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Idempotent install of taskwarrior-web as a user-level service.
+# Idempotent install of taskwarrior-web-portal as a user-level service.
 #
 # macOS: writes a LaunchAgent plist into ~/Library/LaunchAgents/ and bootstraps
 # it with `launchctl bootstrap gui/$(id -u)`.
@@ -15,12 +15,12 @@
 set -euo pipefail
 
 # --- shared constants --------------------------------------------------------
-LABEL="taskwarrior-web"
-PLIST_LABEL="local.taskwarrior-web" # macOS-only: launchd label keeps the
+LABEL="taskwarrior-web-portal"
+PLIST_LABEL="local.taskwarrior-web-portal" # macOS-only: launchd label keeps the
                                     # `local.` prefix as a courtesy domain hint
 REPO_ROOT="$(cd "$(dirname "$0")/.." && pwd)"
-BIN_SRC="${REPO_ROOT}/bin/taskwarrior-web"
-BIN_DST="$HOME/.local/bin/taskwarrior-web"
+BIN_SRC="${REPO_ROOT}/bin/taskwarrior-web-portal"
+BIN_DST="$HOME/.local/bin/taskwarrior-web-portal"
 URL="http://127.0.0.1:5050"
 
 # OS detection. We use the result both for the `tw` shell alias (open vs
@@ -30,12 +30,12 @@ case "$OS" in
     Darwin) OPEN_CMD="open" ;;
     Linux)  OPEN_CMD="xdg-open" ;;
     *)
-        echo "error: unsupported OS '$OS'. taskwarrior-web's install script handles macOS and Linux only." >&2
+        echo "error: unsupported OS '$OS'. taskwarrior-web-portal's install script handles macOS and Linux only." >&2
         exit 1
         ;;
 esac
 ALIAS_LINE="alias tw='${OPEN_CMD} ${URL}'"
-ALIAS_COMMENT="# taskwarrior-web (added by install.sh)"
+ALIAS_COMMENT="# taskwarrior-web-portal (added by install.sh)"
 
 # --- shared install steps (run on every OS) ---------------------------------
 
@@ -61,7 +61,7 @@ fi
 install_darwin() {
     local plist_tmpl="${REPO_ROOT}/deploy/${PLIST_LABEL}.plist.tmpl"
     local plist_dst="$HOME/Library/LaunchAgents/${PLIST_LABEL}.plist"
-    local log_dir="$HOME/Library/Logs/taskwarrior-web"
+    local log_dir="$HOME/Library/Logs/taskwarrior-web-portal"
 
     # Log dir mode 700 - logs may carry operational events incl. task data.
     mkdir -p "$log_dir"
@@ -100,7 +100,7 @@ install_darwin() {
 install_linux() {
     if ! command -v systemctl >/dev/null 2>&1; then
         cat >&2 <<EOF
-error: systemctl not found. taskwarrior-web's Linux install requires
+error: systemctl not found. taskwarrior-web-portal's Linux install requires
        systemd-based init (Ubuntu, Debian, Arch, RHEL, Fedora, openSUSE,
        Manjaro, etc.). Non-systemd distros (Alpine, Void, Devuan, Slackware)
        can run the binary directly via:
@@ -121,7 +121,7 @@ EOF
     # rc-file vars) and install.sh always agree on the log dir, even if
     # the user has a custom XDG_STATE_HOME in ~/.zshrc.
     local xdg_state_home="${XDG_STATE_HOME:-$HOME/.local/state}"
-    local log_dir="${xdg_state_home}/taskwarrior-web"
+    local log_dir="${xdg_state_home}/taskwarrior-web-portal"
 
     # Log dir mode 700 - same rationale as macOS path. Binary creates this
     # itself on startup if missing, but we mkdir here too so the path is
@@ -274,8 +274,8 @@ if [[ $health_ok -eq 1 ]]; then
 else
     echo "health  : FAILED" >&2
     case "$OS" in
-        Darwin) echo "          check ~/Library/Logs/taskwarrior-web/{out,err,app}.log" >&2 ;;
-        Linux)  echo "          check 'journalctl --user -u ${LABEL} -n 50' and \${XDG_STATE_HOME:-~/.local/state}/taskwarrior-web/app.log" >&2 ;;
+        Darwin) echo "          check ~/Library/Logs/taskwarrior-web-portal/{out,err,app}.log" >&2 ;;
+        Linux)  echo "          check 'journalctl --user -u ${LABEL} -n 50' and \${XDG_STATE_HOME:-~/.local/state}/taskwarrior-web-portal/app.log" >&2 ;;
     esac
     exit 1
 fi

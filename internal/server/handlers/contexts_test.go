@@ -9,7 +9,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/furan917/taskwarrior-web/internal/tw"
+	"github.com/furan917/taskwarrior-web-portal/internal/tw"
 )
 
 // --- CRUD handler tests ---
@@ -490,7 +490,7 @@ func TestViews_Report_NoActiveContextRendersInactivePill(t *testing.T) {
 		t.Errorf("inactive pill markup missing: body=%s", body)
 	}
 	// Title should not include any [...] hint.
-	if strings.Contains(body, "[") && strings.Contains(body, "] · taskwarrior-web") {
+	if strings.Contains(body, "[") && strings.Contains(body, "] · taskwarrior-web-portal") {
 		t.Error("title unexpectedly carried context hint")
 	}
 }

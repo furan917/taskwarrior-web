@@ -1,4 +1,4 @@
-# taskwarrior-web
+# taskwarrior-web-portal
 
 Local-only web UI for Taskwarrior 3.x. Single Go binary, served on `127.0.0.1:5050`. Auto-refreshes the list view every 30s; pauses while you're editing so mid-flight inputs aren't clobbered.
 
@@ -9,7 +9,7 @@ Local-only web UI for Taskwarrior 3.x. Single Go binary, served on `127.0.0.1:50
 No Go toolchain needed. Detects your OS and architecture, downloads the right binary, and installs it as a user service:
 
 ```sh
-curl -fsSL https://raw.githubusercontent.com/furan917/taskwarrior-web/main/scripts/get.sh | sh
+curl -fsSL https://raw.githubusercontent.com/furan917/taskwarrior-web-portal/main/scripts/get.sh | sh
 ```
 
 Supports macOS (Intel + Apple Silicon) and Linux (amd64 + arm64). Requires `task` to already be on `$PATH`.
@@ -31,12 +31,12 @@ No Docker, no Node, no database server. Reads/writes go through the existing `ta
 make build           # one-shot: templ generate + tailwindcss + go build
 ```
 
-Output: `bin/taskwarrior-web` (~7 MB stripped binary, all assets embedded).
+Output: `bin/taskwarrior-web-portal` (~7 MB stripped binary, all assets embedded).
 
 ## Run
 
 ```sh
-./bin/taskwarrior-web                  # foreground
+./bin/taskwarrior-web-portal                  # foreground
 make run                               # alias for the above
 open http://127.0.0.1:5050             # in browser
 ```
@@ -51,10 +51,10 @@ The script branches on `uname -s`:
 
 **macOS** (any version with launchd, i.e. all):
 
-1. Copies `bin/taskwarrior-web` to `~/.local/bin/`.
-2. Renders `deploy/local.taskwarrior-web.plist.tmpl` into `~/Library/LaunchAgents/`.
+1. Copies `bin/taskwarrior-web-portal` to `~/.local/bin/`.
+2. Renders `deploy/local.taskwarrior-web-portal.plist.tmpl` into `~/Library/LaunchAgents/`.
 3. Bootstraps it via `launchctl bootstrap gui/$(id -u)`.
-4. Creates `~/Library/Logs/taskwarrior-web/`.
+4. Creates `~/Library/Logs/taskwarrior-web-portal/`.
 5. Enforces `chmod 700 ~/.task`.
 6. Curls `/healthz` to verify it's listening.
 
@@ -62,18 +62,18 @@ Restarts on crash (`KeepAlive` on `Crashed=true`); stays down when stopped clean
 
 **Linux** (any systemd-based distro - Ubuntu, Debian, Arch, RHEL, Fedora, openSUSE, Manjaro, etc.):
 
-1. Copies `bin/taskwarrior-web` to `~/.local/bin/`.
-2. Renders `deploy/taskwarrior-web.service.tmpl` into `~/.config/systemd/user/`.
-3. Enables + starts it via `systemctl --user enable --now taskwarrior-web`.
-4. Creates `${XDG_STATE_HOME:-~/.local/state}/taskwarrior-web/`.
+1. Copies `bin/taskwarrior-web-portal` to `~/.local/bin/`.
+2. Renders `deploy/taskwarrior-web-portal.service.tmpl` into `~/.config/systemd/user/`.
+3. Enables + starts it via `systemctl --user enable --now taskwarrior-web-portal`.
+4. Creates `${XDG_STATE_HOME:-~/.local/state}/taskwarrior-web-portal/`.
 5. Enforces `chmod 700 ~/.task`.
 6. Curls `/healthz` to verify it's listening.
 
 Restarts on crash (`Restart=on-failure`); stays down when stopped cleanly via `systemctl --user stop`. Service starts at login by default; for "running before any login", run `sudo loginctl enable-linger $USER` once.
 
-View logs with `journalctl --user -u taskwarrior-web -f` (last few lines from systemd's panic safety net) or tail `${XDG_STATE_HOME:-~/.local/state}/taskwarrior-web/app.log` (the rotated structured slog stream).
+View logs with `journalctl --user -u taskwarrior-web-portal -f` (last few lines from systemd's panic safety net) or tail `${XDG_STATE_HOME:-~/.local/state}/taskwarrior-web-portal/app.log` (the rotated structured slog stream).
 
-Non-systemd Linux (Alpine, Void, Devuan, Slackware) is not supported by the install script - run `bin/taskwarrior-web &` and supervise it with whatever process manager you prefer.
+Non-systemd Linux (Alpine, Void, Devuan, Slackware) is not supported by the install script - run `bin/taskwarrior-web-portal &` and supervise it with whatever process manager you prefer.
 
 To also append a `tw` alias that opens `http://127.0.0.1:5050`, opt in via
 `INSTALL_ALIAS`:
@@ -107,7 +107,7 @@ regardless of which one the install used.
 make uninstall
 ```
 
-Stops the service (launchd `bootout` on macOS, `systemctl --user disable --now` on Linux), removes the plist or systemd unit, removes the binary from `~/.local/bin/`, and strips the `tw` alias from any shell config it can find. Logs (`~/Library/Logs/taskwarrior-web/` on macOS, `${XDG_STATE_HOME:-~/.local/state}/taskwarrior-web/` on Linux) are preserved so you can review the historical record after removal.
+Stops the service (launchd `bootout` on macOS, `systemctl --user disable --now` on Linux), removes the plist or systemd unit, removes the binary from `~/.local/bin/`, and strips the `tw` alias from any shell config it can find. Logs (`~/Library/Logs/taskwarrior-web-portal/` on macOS, `${XDG_STATE_HOME:-~/.local/state}/taskwarrior-web-portal/` on Linux) are preserved so you can review the historical record after removal.
 
 ## Develop
 
@@ -141,12 +141,12 @@ A handful of smoke tests in `internal/tw/client_test.go` shell out to the real `
 - **Subprocess**: `context.WithTimeout` per invocation (10s default; bulk handlers get 30s; `_context` lookup gets 2s; all centralised in `internal/config`). 64 MB `io.LimitReader` cap on stdout. Stderr captured into a 4 KiB bounded buffer attached to a typed `*tw.TaskExitError` for in-process classification only - never logged.
 - **Validation errors**: typed `*tw.ValidationError{Field, Value, Reason}` instead of string-prefix matched messages, so renaming a message can't silently break field-level highlighting in the UI.
 - **Length cap**: descriptions and annotations are bounded to 4 KiB (`tw.MaxDescriptionBytes`) so a multi-megabyte payload can't blow past the platform's argv limit.
-- **Logs**: live in `~/Library/Logs/taskwarrior-web/` with mode 700 - never `/tmp` (world-readable on macOS). Logs include only method, path, status, duration, request-id; never form bodies, query strings on writes, or task descriptions.
+- **Logs**: live in `~/Library/Logs/taskwarrior-web-portal/` with mode 700 - never `/tmp` (world-readable on macOS). Logs include only method, path, status, duration, request-id; never form bodies, query strings on writes, or task descriptions.
 
 ### Logs
 
-- **Primary**: `~/Library/Logs/taskwarrior-web/app.log` - structured slog text output, size-rotated by [lumberjack](https://github.com/natefinch/lumberjack) baked into the binary. Policy: 10 MB per file, 3 backups, gzip-compressed, 30 day max age. Active file is `app.log`; rotated files become `app-<timestamp>.log.gz`.
-- **Panic safety net**: `out.log` and `err.log` are captured by launchd via the plist's `StandardOutPath` / `StandardErrorPath` and are NOT rotated. `err.log` should stay near-empty under normal operation (only Go runtime panics go to stderr). `out.log` will mirror `app.log` because the binary fans slog output through `io.MultiWriter(os.Stdout, app.log)`; if it grows uncomfortably between launchd cycles, truncate it manually with `: > ~/Library/Logs/taskwarrior-web/out.log` - the binary will reopen on next write. The rotated `app.log` is the source of truth; `out.log` exists so anything written before slog initialises still leaves a trace.
+- **Primary**: `~/Library/Logs/taskwarrior-web-portal/app.log` - structured slog text output, size-rotated by [lumberjack](https://github.com/natefinch/lumberjack) baked into the binary. Policy: 10 MB per file, 3 backups, gzip-compressed, 30 day max age. Active file is `app.log`; rotated files become `app-<timestamp>.log.gz`.
+- **Panic safety net**: `out.log` and `err.log` are captured by launchd via the plist's `StandardOutPath` / `StandardErrorPath` and are NOT rotated. `err.log` should stay near-empty under normal operation (only Go runtime panics go to stderr). `out.log` will mirror `app.log` because the binary fans slog output through `io.MultiWriter(os.Stdout, app.log)`; if it grows uncomfortably between launchd cycles, truncate it manually with `: > ~/Library/Logs/taskwarrior-web-portal/out.log` - the binary will reopen on next write. The rotated `app.log` is the source of truth; `out.log` exists so anything written before slog initialises still leaves a trace.
 
 ## Dark mode
 
@@ -251,12 +251,12 @@ UDA values render as first-class rows in the row info panel, one per UDA, separa
 
 ## Contexts
 
-Taskwarrior contexts are persistent filters defined via the CLI; once active, every list / export / add is implicitly scoped to the context's read filter. taskwarrior-web surfaces this as a coloured pill in the top nav, between the search box and Undo:
+Taskwarrior contexts are persistent filters defined via the CLI; once active, every list / export / add is implicitly scoped to the context's read filter. taskwarrior-web-portal surfaces this as a coloured pill in the top nav, between the search box and Undo:
 
 - **Inactive** - outline-only, greyed funnel icon, label "all", trailing chevron. Click to open the dropdown.
 - **Active** - solid hashed-colour fill, leading status dot with a soft pulse, funnel icon, bold context name, trailing "x" for one-click clear.
 
-Click the pill to open a dropdown listing every defined context (plus "(none)" at the top to clear). Picking an entry POSTs to `/context` and the server replies with `HX-Refresh: true`, reloading the page so the pill, the browser title hint (`Next [work] · taskwarrior-web`), the empty-state copy ("No tasks match in context 'work'.") and the Add Task modal all re-render against the new active state.
+Click the pill to open a dropdown listing every defined context (plus "(none)" at the top to clear). Picking an entry POSTs to `/context` and the server replies with `HX-Refresh: true`, reloading the page so the pill, the browser title hint (`Next [work] · taskwarrior-web-portal`), the empty-state copy ("No tasks match in context 'work'.") and the Add Task modal all re-render against the new active state.
 
 ### Managing contexts
 
@@ -284,7 +284,7 @@ Note: Taskwarrior's per-context **write** filter is NOT applied automatically by
 
 ## Dependencies
 
-Each task in Taskwarrior carries an optional `depends:` list - the UUIDs of tasks that must finish before this one is actionable. taskwarrior-web surfaces this end-to-end:
+Each task in Taskwarrior carries an optional `depends:` list - the UUIDs of tasks that must finish before this one is actionable. taskwarrior-web-portal surfaces this end-to-end:
 
 - **Row badge.** Any task with at least one `depends` entry shows a small "lock N blocked" badge inline with its tags / project / due chips. The count is the raw size of `t.Depends`; whether each prerequisite is still open is left to the `+READY` virtual tag (Ready view already filters them out).
 - **Expand panel.** "Blocked by" section listing each prerequisite's truncated UUID (first 8 hex chars + ellipsis). Each entry is a link that opens that task's edit modal in-place via HTMX.

@@ -1,14 +1,14 @@
 #!/usr/bin/env bash
-# Uninstall taskwarrior-web's user-level service and clean up traces.
-# Logs (in ~/Library/Logs/taskwarrior-web on macOS, ${XDG_STATE_HOME:-
-# ~/.local/state}/taskwarrior-web on Linux) are PRESERVED so users can
+# Uninstall taskwarrior-web-portal's user-level service and clean up traces.
+# Logs (in ~/Library/Logs/taskwarrior-web-portal on macOS, ${XDG_STATE_HOME:-
+# ~/.local/state}/taskwarrior-web-portal on Linux) are PRESERVED so users can
 # review the historical record after removal.
 
 set -euo pipefail
 
-LABEL="taskwarrior-web"
-PLIST_LABEL="local.taskwarrior-web"
-BIN_DST="$HOME/.local/bin/taskwarrior-web"
+LABEL="taskwarrior-web-portal"
+PLIST_LABEL="local.taskwarrior-web-portal"
+BIN_DST="$HOME/.local/bin/taskwarrior-web-portal"
 
 # Loose pattern that matches any tw alias the install script might have
 # written (covers both macOS `open ...` and Linux `xdg-open ...` flavours).
@@ -18,8 +18,8 @@ ALIAS_PATTERN="alias tw=.*127\.0\.0\.1:5050"
 # Match BOTH the new install.sh comment AND the old install-launchd.sh
 # comment from before the script was renamed - ensures upgrades don't
 # leave a stranded comment line.
-ALIAS_COMMENT_PATTERN_NEW="# taskwarrior-web (added by install.sh)"
-ALIAS_COMMENT_PATTERN_OLD="# taskwarrior-web (added by install-launchd.sh)"
+ALIAS_COMMENT_PATTERN_NEW="# taskwarrior-web-portal (added by install.sh)"
+ALIAS_COMMENT_PATTERN_OLD="# taskwarrior-web-portal (added by install-launchd.sh)"
 
 OS="$(uname -s)"
 
@@ -125,7 +125,7 @@ strip_alias_from "$HOME/.config/fish/config.fish"
 
 echo
 case "$OS" in
-    Darwin) echo "Uninstalled. Logs at ~/Library/Logs/taskwarrior-web/ kept." ;;
-    Linux)  echo "Uninstalled. Logs at \${XDG_STATE_HOME:-~/.local/state}/taskwarrior-web/ kept." ;;
+    Darwin) echo "Uninstalled. Logs at ~/Library/Logs/taskwarrior-web-portal/ kept." ;;
+    Linux)  echo "Uninstalled. Logs at \${XDG_STATE_HOME:-~/.local/state}/taskwarrior-web-portal/ kept." ;;
     *)      echo "Uninstalled." ;;
 esac

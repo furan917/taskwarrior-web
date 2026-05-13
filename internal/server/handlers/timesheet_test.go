@@ -4,8 +4,8 @@ import (
 	"testing"
 	"time"
 
-	"github.com/furan917/taskwarrior-web/internal/tw"
-	"github.com/furan917/taskwarrior-web/internal/views"
+	"github.com/furan917/taskwarrior-web-portal/internal/tw"
+	"github.com/furan917/taskwarrior-web-portal/internal/views"
 )
 
 // fixedTime keeps the tests deterministic regardless of when CI runs.

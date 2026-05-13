@@ -7,7 +7,7 @@ import (
 	"log/slog"
 	"net/http"
 
-	"github.com/furan917/taskwarrior-web/internal/server/handlers"
+	"github.com/furan917/taskwarrior-web-portal/internal/server/handlers"
 )
 
 const (

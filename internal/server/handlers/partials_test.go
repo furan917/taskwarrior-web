@@ -7,7 +7,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/furan917/taskwarrior-web/internal/tw"
+	"github.com/furan917/taskwarrior-web-portal/internal/tw"
 )
 
 func TestFilterTasks_DescriptionMatch(t *testing.T) {

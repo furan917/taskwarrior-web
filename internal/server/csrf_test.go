@@ -6,7 +6,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/furan917/taskwarrior-web/internal/server/handlers"
+	"github.com/furan917/taskwarrior-web-portal/internal/server/handlers"
 )
 
 // noopHandler returns 200 OK with a fixed body. Used as the inner handler

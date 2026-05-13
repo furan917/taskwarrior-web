@@ -1,6 +1,6 @@
 package views
 
-import "github.com/furan917/taskwarrior-web/internal/tw"
+import "github.com/furan917/taskwarrior-web-portal/internal/tw"
 
 templ ModalAdd(csrf string, udas []tw.UDA, projects, tags []string, activeContext string, allOpenTasks []tw.Task, prefillProject, prefillTags string, contextOptions []ContextOption) {
 	@modalShell("task-modal") {

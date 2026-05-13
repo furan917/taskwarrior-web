@@ -4,7 +4,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/furan917/taskwarrior-web/internal/tw"
+	"github.com/furan917/taskwarrior-web-portal/internal/tw"
 )
 
 // TestTaskSpan_NoDueExcluded: a task with no Due is invisible on the

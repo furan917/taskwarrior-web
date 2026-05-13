@@ -7,7 +7,7 @@ import (
 	"net/http"
 	"time"
 
-	"github.com/furan917/taskwarrior-web/internal/config"
+	"github.com/furan917/taskwarrior-web-portal/internal/config"
 )
 
 // allowedHosts is the closed set of Host header values this server accepts.

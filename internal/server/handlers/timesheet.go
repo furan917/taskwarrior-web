@@ -6,8 +6,8 @@ import (
 	"sort"
 	"time"
 
-	"github.com/furan917/taskwarrior-web/internal/tw"
-	"github.com/furan917/taskwarrior-web/internal/views"
+	"github.com/furan917/taskwarrior-web-portal/internal/tw"
+	"github.com/furan917/taskwarrior-web-portal/internal/views"
 )
 
 func (v *Views) Timesheet(w http.ResponseWriter, r *http.Request) {

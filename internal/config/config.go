@@ -1,5 +1,5 @@
 // Package config centralises every tunable timeout, address, and derived
-// allowlist for the taskwarrior-web binary. Previously these lived as ad-hoc
+// allowlist for the taskwarrior-web-portal binary. Previously these lived as ad-hoc
 // `const`s and `var`s scattered across server / handlers / tw, with the
 // listen address duplicated in three places. One central package keeps the
 // numbers findable and prevents the port from drifting between server.go,

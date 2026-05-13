@@ -67,7 +67,7 @@ jobs:
           CGO_ENABLED: '0'
         run: |
           mkdir -p dist
-          out="dist/taskwarrior-web-${{ matrix.goos }}-${{ matrix.goarch }}"
+          out="dist/taskwarrior-web-portal-${{ matrix.goos }}-${{ matrix.goarch }}"
           go build -trimpath -ldflags="-s -w" -o "$out" .
           ls -lh "$out"
 
@@ -78,9 +78,9 @@ jobs:
         if: startsWith(github.ref, 'refs/tags/')
         run: |
           tag="${GITHUB_REF#refs/tags/}"
-          stage="taskwarrior-web-${tag}-${{ matrix.goos }}-${{ matrix.goarch }}"
+          stage="taskwarrior-web-portal-${tag}-${{ matrix.goos }}-${{ matrix.goarch }}"
           mkdir -p "$stage"
-          cp "dist/taskwarrior-web-${{ matrix.goos }}-${{ matrix.goarch }}" "$stage/taskwarrior-web"
+          cp "dist/taskwarrior-web-portal-${{ matrix.goos }}-${{ matrix.goarch }}" "$stage/taskwarrior-web-portal"
           cp -r scripts deploy README.md LICENSE* "$stage/" 2>/dev/null || true
           tar -czf "${stage}.tar.gz" "$stage"
           # SHA256 sidecar for download verification.
@@ -90,8 +90,8 @@ jobs:
         if: ${{ !startsWith(github.ref, 'refs/tags/') }}
         uses: actions/upload-artifact@v4
         with:
-          name: taskwarrior-web-${{ matrix.goos }}-${{ matrix.goarch }}
-          path: dist/taskwarrior-web-${{ matrix.goos }}-${{ matrix.goarch }}
+          name: taskwarrior-web-portal-${{ matrix.goos }}-${{ matrix.goarch }}
+          path: dist/taskwarrior-web-portal-${{ matrix.goos }}-${{ matrix.goarch }}
           if-no-files-found: error
 
       - name: Attach to release
@@ -99,8 +99,8 @@ jobs:
         uses: softprops/action-gh-release@v2
         with:
           files: |
-            taskwarrior-web-*.tar.gz
-            taskwarrior-web-*.tar.gz.sha256
+            taskwarrior-web-portal-*.tar.gz
+            taskwarrior-web-portal-*.tar.gz.sha256
           # The release was created by release-please when the release
           # PR merged; we just append our binaries to it. fail_on_unmatched
           # surfaces a missing-release case loudly.

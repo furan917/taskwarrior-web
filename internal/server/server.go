@@ -9,8 +9,8 @@ import (
 	"net/http"
 	"time"
 
-	"github.com/furan917/taskwarrior-web/internal/config"
-	"github.com/furan917/taskwarrior-web/internal/tw"
+	"github.com/furan917/taskwarrior-web-portal/internal/config"
+	"github.com/furan917/taskwarrior-web-portal/internal/tw"
 )
 
 // DefaultAddr is re-exported from config so the existing main.go default

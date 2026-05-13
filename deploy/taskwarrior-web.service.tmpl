@@ -1,6 +1,6 @@
 [Unit]
-Description=taskwarrior-web - local web UI for Taskwarrior
-Documentation=https://github.com/furan917/taskwarrior-web
+Description=taskwarrior-web-portal - local web UI for Taskwarrior
+Documentation=https://github.com/furan917/taskwarrior-web-portal
 # Light dependency on basic.target (the user manager's "ready for services"
 # goal). default.target IS the synthetic that pulls things in via WantedBy,
 # so After=default.target reads as "after our own goal" - backwards.
@@ -17,10 +17,10 @@ RestartSec=10
 TimeoutStopSec=10
 
 # stdout/stderr go to the systemd journal. Tail with:
-#   journalctl --user -u taskwarrior-web -f
+#   journalctl --user -u taskwarrior-web-portal -f
 # These are the panic safety net only - the binary writes its primary
 # structured slog stream to ${XDG_STATE_HOME:-~/.local/state}/
-# taskwarrior-web/app.log with size-based rotation (10 MB/file, 3 backups,
+# taskwarrior-web-portal/app.log with size-based rotation (10 MB/file, 3 backups,
 # 30 day max age, gzip-compressed) via lumberjack. The journal stream
 # should remain near-empty under normal operation.
 StandardOutput=journal
@@ -31,7 +31,7 @@ StandardInput=null
 # common install locations: ~/.local/bin (pip --user, uv tool, custom build),
 # Linuxbrew default prefix, /usr/local (manual builds), distro packages
 # (/usr/bin). If your `task` lives elsewhere, override here or via a drop-in
-# at ~/.config/systemd/user/taskwarrior-web.service.d/path.conf.
+# at ~/.config/systemd/user/taskwarrior-web-portal.service.d/path.conf.
 Environment=PATH=%h/.local/bin:/home/linuxbrew/.linuxbrew/bin:/usr/local/bin:/usr/bin:/bin
 
 # XDG_STATE_HOME is pinned by install.sh at install time so the install

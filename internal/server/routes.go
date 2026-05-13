@@ -3,7 +3,7 @@ package server
 import (
 	"net/http"
 
-	"github.com/furan917/taskwarrior-web/internal/server/handlers"
+	"github.com/furan917/taskwarrior-web-portal/internal/server/handlers"
 )
 
 // staticHandler wraps the embedded FS server. Cache-Control is no-cache so the

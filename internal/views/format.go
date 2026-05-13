@@ -7,7 +7,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/furan917/taskwarrior-web/internal/tw"
+	"github.com/furan917/taskwarrior-web-portal/internal/tw"
 )
 
 // udaDisplayLabel turns a raw UDA name into a friendly heading for the row

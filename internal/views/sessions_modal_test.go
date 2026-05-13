@@ -4,7 +4,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/furan917/taskwarrior-web/internal/tw"
+	"github.com/furan917/taskwarrior-web-portal/internal/tw"
 )
 
 // mkSession is a test helper for building tw.Session values without the

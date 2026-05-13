@@ -343,12 +343,12 @@ func contextMenuItemClass(active bool) string {
 
 // titleWithContext is the helper layout.templ uses to assemble the browser
 // <title> with the optional [<context>] hint. Empty context returns the bare
-// title; non-empty returns "<base> [<context>] · taskwarrior-web". Lives here
+// title; non-empty returns "<base> [<context>] · taskwarrior-web-portal". Lives here
 // (rather than in format.go) so the context-related rendering helpers stay
 // colocated.
 func titleWithContext(base, ctxName string) string {
 	if ctxName == "" {
-		return base + " · taskwarrior-web"
+		return base + " · taskwarrior-web-portal"
 	}
-	return base + " [" + ctxName + "] · taskwarrior-web"
+	return base + " [" + ctxName + "] · taskwarrior-web-portal"
 }

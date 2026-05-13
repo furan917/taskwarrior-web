@@ -1,4 +1,4 @@
-# taskwarrior-web — Makefile with real file deps for incremental builds.
+# taskwarrior-web-portal — Makefile with real file deps for incremental builds.
 # Phony targets are workflow shortcuts; file targets do the actual work and
 # only re-run when their inputs change.
 
@@ -10,7 +10,7 @@ TAILWIND       := ./scripts/tailwindcss
 TAILWIND_IN    := web/tailwind.input.css
 TAILWIND_OUT   := web/static/app.css
 
-BIN            := bin/taskwarrior-web
+BIN            := bin/taskwarrior-web-portal
 
 # templ regenerates ALL *_templ.go files in one pass; depending the group on
 # the source group is good enough.

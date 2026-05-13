@@ -31,4 +31,4 @@ jobs:
           release-type: go
           # Defaults to repo name; override only if you want a different
           # name in the changelog header.
-          # package-name: taskwarrior-web
+          # package-name: taskwarrior-web-portal

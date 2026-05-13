@@ -7,9 +7,9 @@ import (
 	"net/http"
 	"strings"
 
-	"github.com/furan917/taskwarrior-web/internal/config"
-	"github.com/furan917/taskwarrior-web/internal/tw"
-	"github.com/furan917/taskwarrior-web/internal/views"
+	"github.com/furan917/taskwarrior-web-portal/internal/config"
+	"github.com/furan917/taskwarrior-web-portal/internal/tw"
+	"github.com/furan917/taskwarrior-web-portal/internal/views"
 )
 
 // activeContext returns the current Taskwarrior context name for this

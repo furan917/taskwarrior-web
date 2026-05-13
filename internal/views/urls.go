@@ -7,7 +7,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/furan917/taskwarrior-web/internal/tw"
+	"github.com/furan917/taskwarrior-web-portal/internal/tw"
 )
 
 // ParseSort extracts the SortSpec from a request's URL values. Unknown keys or

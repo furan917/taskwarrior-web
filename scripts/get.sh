@@ -1,10 +1,10 @@
 #!/usr/bin/env sh
-# Download the latest taskwarrior-web release for this OS/arch, verify its
+# Download the latest taskwarrior-web-portal release for this OS/arch, verify its
 # SHA256 against the published sidecar, extract it, and run the bundled
 # install script. Supports macOS (amd64/arm64) and Linux (amd64/arm64).
 #
 # Usage:
-#   curl -fsSL https://raw.githubusercontent.com/furan917/taskwarrior-web/main/scripts/get.sh | sh
+#   curl -fsSL https://raw.githubusercontent.com/furan917/taskwarrior-web-portal/main/scripts/get.sh | sh
 #
 # Optional: prefix with INSTALL_ALIAS=1 to also add a 'tw' shell alias.
 #
@@ -23,7 +23,7 @@
 #   escape `$tmp`.
 set -euo pipefail
 
-REPO="furan917/taskwarrior-web"
+REPO="furan917/taskwarrior-web-portal"
 
 # --- detect OS ----------------------------------------------------------------
 os=$(uname -s | tr '[:upper:]' '[:lower:]')
@@ -73,10 +73,10 @@ case "$tag" in
         ;;
 esac
 
-echo "Installing taskwarrior-web ${tag} (${os}/${arch})..."
+echo "Installing taskwarrior-web-portal ${tag} (${os}/${arch})..."
 
 # --- download archive + sidecar -----------------------------------------------
-archive="taskwarrior-web-${tag}-${os}-${arch}.tar.gz"
+archive="taskwarrior-web-portal-${tag}-${os}-${arch}.tar.gz"
 url="https://github.com/${REPO}/releases/download/${tag}/${archive}"
 sha_url="${url}.sha256"
 tmp=$(mktemp -d)
@@ -88,7 +88,7 @@ trap 'rm -rf "$tmp"' EXIT
 curl -fsSL -o "${tmp}/${archive}" "$url"
 curl -fsSL -o "${tmp}/${archive}.sha256" "$sha_url"
 
-# Verify. The .sha256 sidecar contains a relative filename ("taskwarrior-web-
+# Verify. The .sha256 sidecar contains a relative filename ("taskwarrior-web-portal-
 # vX.Y.Z-darwin-arm64.tar.gz"); change into $tmp so the verifier finds the
 # archive next to its sidecar without us rewriting the sidecar's filename
 # column.
@@ -97,7 +97,7 @@ echo "verified: SHA256 matches published sidecar"
 
 # --- extract + hand off to install.sh -----------------------------------------
 tar -xzf "${tmp}/${archive}" -C "$tmp"
-cd "${tmp}/taskwarrior-web-${tag}-${os}-${arch}"
+cd "${tmp}/taskwarrior-web-portal-${tag}-${os}-${arch}"
 # Release tarballs place the binary at the root; install.sh expects bin/.
-[ -f "taskwarrior-web" ] && { mkdir -p bin; mv taskwarrior-web bin/; }
+[ -f "taskwarrior-web-portal" ] && { mkdir -p bin; mv taskwarrior-web-portal bin/; }
 bash scripts/install.sh

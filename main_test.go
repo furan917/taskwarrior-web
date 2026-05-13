@@ -12,8 +12,8 @@ import (
 // injectable.
 //
 // Lock-step contract: these paths MUST match what scripts/install.sh
-// creates (install_darwin: ~/Library/Logs/taskwarrior-web; install_linux:
-// ${XDG_STATE_HOME:-$HOME/.local/state}/taskwarrior-web). If you change one
+// creates (install_darwin: ~/Library/Logs/taskwarrior-web-portal; install_linux:
+// ${XDG_STATE_HOME:-$HOME/.local/state}/taskwarrior-web-portal). If you change one
 // side, change the other and update this test.
 func TestLogDirFor(t *testing.T) {
 	const home = "/home/franklin"
@@ -27,37 +27,37 @@ func TestLogDirFor(t *testing.T) {
 			name: "macOS: Apple-conventional Library/Logs",
 			goos: "darwin",
 			xdg:  "", // ignored on darwin
-			want: filepath.Join(home, "Library", "Logs", "taskwarrior-web"),
+			want: filepath.Join(home, "Library", "Logs", "taskwarrior-web-portal"),
 		},
 		{
 			name: "macOS ignores XDG_STATE_HOME (filesystem convention is Library/Logs)",
 			goos: "darwin",
 			xdg:  "/some/exotic/state",
-			want: filepath.Join(home, "Library", "Logs", "taskwarrior-web"),
+			want: filepath.Join(home, "Library", "Logs", "taskwarrior-web-portal"),
 		},
 		{
 			name: "Linux default: ~/.local/state",
 			goos: "linux",
 			xdg:  "",
-			want: filepath.Join(home, ".local", "state", "taskwarrior-web"),
+			want: filepath.Join(home, ".local", "state", "taskwarrior-web-portal"),
 		},
 		{
 			name: "Linux with XDG_STATE_HOME set: honour the env var",
 			goos: "linux",
 			xdg:  "/var/lib/franklin/state",
-			want: filepath.Join("/var/lib/franklin/state", "taskwarrior-web"),
+			want: filepath.Join("/var/lib/franklin/state", "taskwarrior-web-portal"),
 		},
 		{
 			name: "FreeBSD/other unix follows the Linux/XDG path (not Library/Logs)",
 			goos: "freebsd",
 			xdg:  "",
-			want: filepath.Join(home, ".local", "state", "taskwarrior-web"),
+			want: filepath.Join(home, ".local", "state", "taskwarrior-web-portal"),
 		},
 		{
 			name: "Windows falls through to the XDG path (install.sh doesn't support Windows but the binary stays harmless)",
 			goos: "windows",
 			xdg:  "",
-			want: filepath.Join(home, ".local", "state", "taskwarrior-web"),
+			want: filepath.Join(home, ".local", "state", "taskwarrior-web-portal"),
 		},
 	}
 

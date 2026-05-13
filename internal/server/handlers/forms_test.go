@@ -12,7 +12,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/furan917/taskwarrior-web/internal/tw"
+	"github.com/furan917/taskwarrior-web-portal/internal/tw"
 )
 
 // installFakeTask is a thin wrapper around installFakeTaskWith for the most

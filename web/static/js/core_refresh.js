@@ -1,6 +1,6 @@
 // core_refresh.js - shouldRefresh() (used by hx-trigger="every 30s [shouldRefresh()]")
 // and visibilitychange immediate-refresh trigger.
-// taskwarrior-web client-side helpers.
+// taskwarrior-web-portal client-side helpers.
 // Loaded after htmx.min.js. Jobs:
 //   1. shouldRefresh()  - HTMX trigger gate (used by hx-trigger="every 30s [shouldRefresh()]")
 //   2. visibilitychange - immediate refresh when the tab returns to foreground

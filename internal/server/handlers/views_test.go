@@ -9,8 +9,8 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/furan917/taskwarrior-web/internal/tw"
-	"github.com/furan917/taskwarrior-web/internal/views"
+	"github.com/furan917/taskwarrior-web-portal/internal/tw"
+	"github.com/furan917/taskwarrior-web-portal/internal/views"
 )
 
 // TestViews_FilterCache_ResolvesOnce confirms that the per-name `task _get

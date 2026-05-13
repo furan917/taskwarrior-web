@@ -1,4 +1,4 @@
-module github.com/furan917/taskwarrior-web
+module github.com/furan917/taskwarrior-web-portal
 
 go 1.25.4
 
