@@ -1,5 +1,13 @@
 # Changelog
 
+## [1.3.0](https://github.com/furan917/taskwarrior-web/compare/v1.2.3...v1.3.0) (2026-05-13)
+
+
+### Features
+
+* Add session editing for time tracking ([d27db76](https://github.com/furan917/taskwarrior-web/commit/d27db76ac62aa8dd716a1bd38dae57b8ebcd476c))
+* Add session editing for time tracking ([4eb0393](https://github.com/furan917/taskwarrior-web/commit/4eb03930d7050b15192f147bde50a50852a77b29))
+
 ## [1.2.3](https://github.com/furan917/taskwarrior-web/compare/v1.2.2...v1.2.3) (2026-05-11)
 
 
