@@ -192,10 +192,39 @@ func (v *Views) renderReport(w http.ResponseWriter, r *http.Request, name string
 		http.Error(w, exportErrMsg(err), http.StatusInternalServerError)
 		return
 	}
+	tasks = retainPendingDeps(tasks)
 	page := v.buildPage(r, spec.title, spec.active, true)
 	renderHTML(w, r, "Report",
 		views.ListPage(page, name, "", tasks, views.ParseSort(r.URL.Query()), v.userFilter(r)),
 		v.Logger, "report", name)
+}
+
+// retainPendingDeps filters each task's Depends list to only include UUIDs
+// that belong to another pending/waiting task in the same slice. This mirrors
+// Taskwarrior's own rule: deleted and completed tasks never block a dependent.
+// The row template and stats counter both use len(Depends)>0 to decide whether
+// a task is blocked, so without this step a stale dep on a deleted task would
+// wrongly mark the task as blocked.
+func retainPendingDeps(tasks []tw.Task) []tw.Task {
+	live := make(map[string]bool, len(tasks))
+	for _, t := range tasks {
+		if t.Status == "pending" || t.Status == "waiting" {
+			live[t.UUID] = true
+		}
+	}
+	for i, t := range tasks {
+		if len(t.Depends) == 0 {
+			continue
+		}
+		filtered := t.Depends[:0]
+		for _, dep := range t.Depends {
+			if live[dep] {
+				filtered = append(filtered, dep)
+			}
+		}
+		tasks[i].Depends = filtered
+	}
+	return tasks
 }
 
 // Labels lists every project and every tag currently attached to open
@@ -646,6 +675,7 @@ func (v *Views) Stats(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "task export failed", http.StatusInternalServerError)
 		return
 	}
+	open = retainPendingDeps(open)
 	stats := computeStats(open, completed, statsHistoryDays)
 	stats.Recurring = len(recurring)
 	now := time.Now()

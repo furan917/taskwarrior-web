@@ -88,11 +88,11 @@ func taskColourBar(uuid string) string {
 // either flooding "critical" or starving the high tiers.
 func urgencyTier(score float64) string {
 	switch {
-	case score >= 9:
+	case score >= 20:
 		return "critical"
-	case score >= 6:
+	case score >= 12:
 		return "high"
-	case score >= 3:
+	case score >= 6:
 		return "med"
 	default:
 		return "low"
@@ -158,13 +158,14 @@ func tierBadge(tier string) string {
 	}
 }
 
-// urgencyPercent maps Taskwarrior's open-ended urgency score to 0-100. Anything
-// above ~10 is exceptional and clamps at 100.
+// urgencyPercent maps Taskwarrior's open-ended urgency score to 0-100.
+// Scaled so urgency ~25 (overdue + priority H) reaches 100%; tasks due
+// in a few days land in the 40-65% range and no-due-date tasks sit under 20%.
 func urgencyPercent(score float64) float64 {
 	if score <= 0 {
 		return 0
 	}
-	pct := score * 10
+	pct := score * 4
 	if pct > 100 {
 		pct = 100
 	}
