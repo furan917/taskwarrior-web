@@ -130,6 +130,10 @@ func TestViews_Report_RendersAllNamedReports(t *testing.T) {
 // (which exercises Row + rowDetailGrid for every task) and assert both
 // surfaces are present in the HTML.
 func TestViews_Report_RendersDependencyBadgeAndPanel(t *testing.T) {
+	// The blocked task and its two blockers must all be pending — retainPendingDeps
+	// only keeps deps whose target appears as a pending/waiting task in the same
+	// export result, matching Taskwarrior's rule that deleted/completed deps are
+	// treated as resolved.
 	installFakeTask(t, `[{
 		"id": 1,
 		"uuid": "11111111-2222-3333-4444-555555555555",
@@ -140,6 +144,18 @@ func TestViews_Report_RendersDependencyBadgeAndPanel(t *testing.T) {
 			"22222222-3333-4444-5555-666666666666",
 			"33333333-4444-5555-6666-777777777777"
 		]
+	},{
+		"id": 2,
+		"uuid": "22222222-3333-4444-5555-666666666666",
+		"description": "blocker one",
+		"status": "pending",
+		"entry": "20260501T120000Z"
+	},{
+		"id": 3,
+		"uuid": "33333333-4444-5555-6666-777777777777",
+		"description": "blocker two",
+		"status": "pending",
+		"entry": "20260501T120000Z"
 	}]`)
 	v := newViewsForTest()
 	h := v.Report("next")

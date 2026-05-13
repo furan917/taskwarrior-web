@@ -63,13 +63,13 @@ func TestUrgencyTier(t *testing.T) {
 	}{
 		{-5, "low"},
 		{0, "low"},
-		{2.99, "low"},
-		{3, "med"},
-		{5.99, "med"},
-		{6, "high"},
-		{8.99, "high"},
-		{9, "critical"},
-		{12, "critical"},
+		{5.99, "low"},
+		{6, "med"},
+		{11.99, "med"},
+		{12, "high"},
+		{19.99, "high"},
+		{20, "critical"},
+		{30, "critical"},
 	}
 	for _, c := range cases {
 		if got := urgencyTier(c.score); got != c.want {
@@ -188,10 +188,10 @@ func TestUrgencyBarColour(t *testing.T) {
 		want  string
 	}{
 		{0, "blue"},
-		{2, "blue"},
-		{4, "yellow"},
-		{7, "orange"},
-		{10, "red"},
+		{5, "blue"},
+		{6, "yellow"},
+		{13, "orange"},
+		{20, "red"},
 	} {
 		got := urgencyBarColour(c.score)
 		if !strings.Contains(got, c.want) {
@@ -207,9 +207,10 @@ func TestUrgencyPercent(t *testing.T) {
 	}{
 		{-1, 0},
 		{0, 0},
-		{5, 50},
-		{10, 100},
-		{15, 100}, // clamps
+		{5, 20},
+		{10, 40},
+		{25, 100},
+		{30, 100}, // clamps
 	}
 	for _, c := range cases {
 		if got := urgencyPercent(c.score); got != c.want {
@@ -305,7 +306,7 @@ func TestCalendarCellClass(t *testing.T) {
 }
 
 func TestCalendarChipClass(t *testing.T) {
-	hi := tw.Task{Urgency: 10}
+	hi := tw.Task{Urgency: 20} // critical tier requires ≥ 20
 	// Single -> solid (white text on red).
 	single := calendarChipClass(CalendarChip{Task: hi, Position: "single"})
 	if !strings.Contains(single, "bg-red-600") || !strings.Contains(single, "text-white") {
