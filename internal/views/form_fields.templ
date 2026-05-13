@@ -144,7 +144,7 @@ templ formFields(f taskForm, udas []tw.UDA, projects, tags []string, allOpenTask
 					<span>Due</span>
 					@dateHelpTip()
 				</div>
-				<input type="text" name="due" value={ f.Due } placeholder="+2d / tomorrow / 2026-05-09" class="w-full rounded border border-zinc-300 px-2 py-1.5 text-sm focus:border-blue-500 focus:outline-none dark:border-zinc-600 dark:bg-zinc-800 dark:text-zinc-100 dark:placeholder-zinc-500"/>
+				@dateInputWithPicker("due", f.Due, "+2d / tomorrow / 2026-05-09")
 				@datePresets("due", []string{"today", "tomorrow", "+3d", "+1w", "+2w", "eom"})
 			</label>
 			<label class="block text-sm">
@@ -152,7 +152,7 @@ templ formFields(f taskForm, udas []tw.UDA, projects, tags []string, allOpenTask
 					<span>Wait</span>
 					@dateHelpTip()
 				</div>
-				<input type="text" name="wait" value={ f.Wait } placeholder="+1d / due-7d" class="w-full rounded border border-zinc-300 px-2 py-1.5 text-sm focus:border-blue-500 focus:outline-none dark:border-zinc-600 dark:bg-zinc-800 dark:text-zinc-100 dark:placeholder-zinc-500"/>
+				@dateInputWithPicker("wait", f.Wait, "+1d / due-7d")
 				@datePresets("wait", []string{"tomorrow", "+1w", "due-7d", "due-3d"})
 			</label>
 			<label class="col-span-2 block text-sm">
@@ -160,7 +160,7 @@ templ formFields(f taskForm, udas []tw.UDA, projects, tags []string, allOpenTask
 					<span>Scheduled for start</span>
 					@dateHelpTip()
 				</div>
-				<input type="text" name="scheduled" value={ f.Scheduled } placeholder="+3d / due-3d / 2026-05-15" class="w-full rounded border border-zinc-300 px-2 py-1.5 text-sm focus:border-blue-500 focus:outline-none dark:border-zinc-600 dark:bg-zinc-800 dark:text-zinc-100 dark:placeholder-zinc-500"/>
+				@dateInputWithPicker("scheduled", f.Scheduled, "+3d / due-3d / 2026-05-15")
 				@datePresets("scheduled", []string{"today", "tomorrow", "+3d", "due-3d", "due-1d"})
 			</label>
 			<label class="block text-sm">
@@ -183,7 +183,7 @@ templ formFields(f taskForm, udas []tw.UDA, projects, tags []string, allOpenTask
 				if f.RecurrenceReadOnly {
 					<input type="text" name="until" value={ f.Until } readonly tabindex="-1" class="w-full cursor-not-allowed rounded border border-zinc-200 bg-zinc-50 px-2 py-1.5 text-sm text-zinc-500 dark:border-zinc-700 dark:bg-zinc-800/60 dark:text-zinc-400"/>
 				} else {
-					<input type="text" name="until" value={ f.Until } placeholder="2027-01-01 / eoy" class="w-full rounded border border-zinc-300 px-2 py-1.5 text-sm focus:border-blue-500 focus:outline-none dark:border-zinc-600 dark:bg-zinc-800 dark:text-zinc-100 dark:placeholder-zinc-500"/>
+					@dateInputWithPicker("until", f.Until, "2027-01-01 / eoy")
 					@datePresets("until", []string{"+3mo", "+6mo", "+1y", "eoy"})
 				}
 			</label>
@@ -361,4 +361,38 @@ templ udaField(u tw.UDA, value string) {
 			/>
 		}
 	</label>
+}
+
+// dateInputWithPicker renders a text input with a small calendar
+// icon to its right. The icon opens a flatpickr picker (wired by
+// form_date_picker.js via the wrap-mode contract: [data-fp-date] on
+// the wrapper, [data-input] on the field, [data-toggle] on the
+// button). Click on the input itself is left as plain typing -
+// allowing Taskwarrior relative-date entry like "+2d" or "tomorrow"
+// alongside the ISO date the picker produces.
+templ dateInputWithPicker(name, value, placeholder string) {
+	<div class="relative" data-fp-date>
+		<input
+			type="text"
+			name={ name }
+			value={ value }
+			placeholder={ placeholder }
+			data-input
+			class="w-full rounded border border-zinc-300 px-2 py-1.5 pr-9 text-sm focus:border-blue-500 focus:outline-none dark:border-zinc-600 dark:bg-zinc-800 dark:text-zinc-100 dark:placeholder-zinc-500"
+		/>
+		<button
+			type="button"
+			data-toggle
+			class="absolute right-1 top-1/2 -translate-y-1/2 inline-flex h-7 w-7 items-center justify-center rounded text-zinc-400 hover:bg-zinc-100 hover:text-zinc-700 focus:outline-none focus:ring-2 focus:ring-blue-500 dark:hover:bg-zinc-800 dark:hover:text-zinc-200"
+			aria-label="Pick date"
+			title="Pick date"
+		>
+			<svg class="h-4 w-4" viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+				<rect x="3" y="4" width="14" height="13" rx="2"></rect>
+				<path d="M3 8h14"></path>
+				<path d="M7 2v4"></path>
+				<path d="M13 2v4"></path>
+			</svg>
+		</button>
+	</div>
 }

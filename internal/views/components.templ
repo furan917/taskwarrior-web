@@ -2,18 +2,20 @@ package views
 
 import "fmt"
 
-// modalShell is the shared <dialog> chrome for ModalAdd and ModalEdit. It
-// renders the dialog wrapper, the standard title row with the close-X
-// button, and yields its children inside the dialog directly after the
-// header. Callers wrap their <form> in modalShell so the dialog/title/close
-// chrome lives in exactly one place.
+// modalShell is the shared <dialog> wrapper for every modal in the app
+// (ModalAdd, ModalEdit, ContextForm, SessionsModal). It renders only the
+// dialog element + class, so callers retain full control of their own
+// header chrome - ModalAdd / ModalEdit use the shared modalHeader, while
+// SessionsModal renders its own header (sessionsHeader) because the
+// timesheet entry point needs a back-chevron in the title slot.
 //
-// The two modals diverge slightly: ModalAdd has a context picker rendered
-// as a header subtitle. That fits inside the same header div, so we accept
-// it via the header's children block via a separate modalHeader partial.
-// modalShell itself only knows about the wrapper.
-templ modalShell() {
-	<dialog id="task-modal" class={ "w-full " + ModalMaxWidth + " rounded-lg p-0 shadow-xl backdrop:bg-black/40 dark:bg-zinc-900 dark:text-zinc-100" }>
+// id is the DOM id the caller's HTMX swap target points at (#task-modal
+// for the edit/add stack, #sessions-modal for the stacked sessions
+// editor). Parametrising it - rather than hardcoding "task-modal" - is
+// what unlocks shared use across the modal family without each caller
+// re-stamping the same <dialog> opening tag.
+templ modalShell(id string) {
+	<dialog id={ id } class={ "w-full " + ModalMaxWidth + " rounded-lg p-0 shadow-xl backdrop:bg-black/40 dark:bg-zinc-900 dark:text-zinc-100" }>
 		{ children... }
 	</dialog>
 }
@@ -23,7 +25,10 @@ templ modalShell() {
 // the title - ModalAdd uses it to inject the context picker; ModalEdit
 // passes nothing.
 templ modalHeader(title string) {
-	<div class="flex items-start justify-between border-b border-zinc-200 px-4 py-3 dark:border-zinc-700">
+	// sticky + bg ensures the title and close-X stay visible when the
+	// dialog scrolls long content - the user doesn't have to scroll
+	// back up to dismiss or jump to other affordances.
+	<div class="sticky top-0 z-10 flex items-start justify-between border-b border-zinc-200 bg-white px-4 py-3 dark:border-zinc-700 dark:bg-zinc-900">
 		<div class="flex-1">
 			<h2 class="text-base font-semibold">{ title }</h2>
 			{ children... }

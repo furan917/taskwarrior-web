@@ -3,7 +3,7 @@ package views
 import "github.com/furan917/taskwarrior-web/internal/tw"
 
 templ ModalAdd(csrf string, udas []tw.UDA, projects, tags []string, activeContext string, allOpenTasks []tw.Task, prefillProject, prefillTags string, contextOptions []ContextOption) {
-	@modalShell() {
+	@modalShell("task-modal") {
 		<form hx-post="/tasks" hx-target-error="#task-form-errors" hx-swap="innerHTML" class="flex flex-col">
 			<input type="hidden" name="_csrf" value={ csrf }/>
 			@modalHeader("Add task") {

@@ -14,18 +14,21 @@
 @variant dark (&:where(.dark, .dark *));
 
 /*
- * Centre <dialog>.showModal() reliably across Chrome/Safari/Firefox. The
- * UA `inset: 0; margin: auto` approach is fragile under Tailwind v4
- * preflight (known issue across shadcn/Flowbite/etc as of 2026). Explicit
- * fixed-position + translate works everywhere.
+ * Centre <dialog>.showModal() via inset + auto margins instead of
+ * transform-translate. The previous translate(-50%, -50%) approach
+ * made the dialog a containing block for any descendant with
+ * position:fixed (CSS quirk: any transformed ancestor scopes fixed
+ * children). That broke flatpickr's picker, which computes viewport
+ * coords for `top`/`left` and expects them to map 1:1 - with the
+ * transformed ancestor those coords got re-shifted, landing the
+ * popup way off the input. Auto-margin centering produces the same
+ * visual result without the containing-block side effect.
  */
 @layer base {
   dialog[open] {
     position: fixed;
-    top: 50%;
-    left: 50%;
-    transform: translate(-50%, -50%);
-    margin: 0;
+    inset: 0;
+    margin: auto;
     max-height: 90vh;
     overflow: auto;
   }
@@ -52,15 +55,9 @@
 }
 
 /*
- * Component-layer rules that previously lived as runtime <style> injections
- * in app.js. The injection sites still run (we'll remove them in the next
- * batch) but this means the styles work even before app.js executes - any
- * server-rendered .row-focused or open context dropdown shows correctly on
- * first paint, no FOUC.
- *
- * Keep these in sync with the JS injections in app.js until that batch lands:
- *   - .row-focused: ~line 32 (FOCUS_CLASS injection)
- *   - .context-pill open rule: ~line 481 (context-wrap CSS injection)
+ * Component-layer rules below are styles that need to be visible BEFORE
+ * any JS executes - server-rendered .row-focused or an open popover
+ * paint correctly on first paint, no FOUC.
  */
 @keyframes drawer-slide-in {
   from { transform: translateX(-100%); }
@@ -87,7 +84,246 @@
     background-color: #eff6ff;
   }
 
+  /*
+   * Error highlight on session-editor rows (sessions_modal.js applies
+   * this class to rows flagged by client- or server-side validation).
+   * We use outline + background tint rather than `border-red-500`
+   * because Tailwind emits `border-zinc-200` AFTER `border-red-500`
+   * in the generated stylesheet, so the row's own border-color class
+   * wins the cascade and the red border is invisible. Outline is a
+   * separate CSS property and bg-color overrides the row's bg-white.
+   * Dark-mode tint is dimmer so it doesn't blast contrast against
+   * the dark zinc shell.
+   */
+  .session-row-error {
+    outline: 2px solid #dc2626;
+    outline-offset: 2px;
+    background-color: #fef2f2;
+  }
+  .dark .session-row-error {
+    background-color: rgba(127, 29, 29, 0.25);
+  }
+
   [data-popover-wrap][data-open="1"] [data-popover-menu] {
     display: block !important;
   }
+}
+
+/*
+ * flatpickr overrides live OUTSIDE any @layer block so they sit in
+ * the same unlayered cascade tier as the vendored flatpickr.min.css
+ * (loaded via separate <link>). Unlayered rules in Tailwind v4
+ * outrank layered rules - putting these inside @layer components
+ * gets them clobbered by flatpickr's own rules regardless of
+ * specificity.
+ */
+
+/* Force fixed positioning so the picker escapes the sessions modal's
+   transformed-ancestor containing block AND the inner list's
+   overflow:auto clipper. flatpickr computes viewport coords for
+   top/left which map 1:1 to position:fixed. The max-height +
+   overflow:auto pair caps the calendar to the viewport so it
+   never runs off the bottom of a short window; combined with the
+   shorter cell sizes in @media (max-height: ...) below, this is
+   the belt-and-braces of the height fix. */
+.flatpickr-calendar.open {
+  position: fixed !important;
+  max-height: calc(100vh - 16px);
+  overflow-y: auto;
+}
+
+/* Short-viewport adaptations - shrink cell + time bar sizes so
+   the picker fits without internal scroll on laptops with a
+   modest window or split-screen layouts. */
+@media (max-height: 640px) {
+  .flatpickr-day {
+    height: 30px;
+    line-height: 30px;
+  }
+  .flatpickr-time {
+    height: 36px;
+  }
+  .tw-fp-footer {
+    padding: 0.25rem 0;
+    gap: 1rem;
+  }
+  .tw-fp-footer button {
+    width: 32px;
+    height: 32px;
+  }
+}
+
+/* Dark-mode theme. Keyed on the .dark class our app toggles on
+   <html>. Targets the elements flatpickr's own CSS paints so they
+   adopt the same zinc-900/zinc-100 surface the rest of the app
+   uses. */
+.dark .flatpickr-calendar {
+  background: rgb(24 24 27);
+  border-color: rgb(63 63 70);
+  color: rgb(244 244 245);
+  box-shadow: 0 4px 8px rgb(0 0 0 / 0.4);
+}
+.dark .flatpickr-calendar.arrowTop:before,
+.dark .flatpickr-calendar.arrowBottom:before {
+  border-bottom-color: rgb(63 63 70);
+  border-top-color: rgb(63 63 70);
+}
+.dark .flatpickr-calendar.arrowTop:after,
+.dark .flatpickr-calendar.arrowBottom:after {
+  border-bottom-color: rgb(24 24 27);
+  border-top-color: rgb(24 24 27);
+}
+.dark .flatpickr-months .flatpickr-month,
+.dark .flatpickr-current-month,
+.dark .flatpickr-current-month input.cur-year,
+.dark .flatpickr-monthDropdown-months,
+.dark .flatpickr-weekday {
+  color: rgb(244 244 245);
+  fill: rgb(244 244 245);
+  background: transparent;
+}
+.dark .flatpickr-monthDropdown-month {
+  background: rgb(24 24 27);
+}
+.dark .flatpickr-months .flatpickr-prev-month,
+.dark .flatpickr-months .flatpickr-next-month {
+  color: rgb(244 244 245);
+  fill: rgb(244 244 245);
+}
+.dark .flatpickr-months .flatpickr-prev-month:hover,
+.dark .flatpickr-months .flatpickr-next-month:hover {
+  color: rgb(96 165 250);
+  fill: rgb(96 165 250);
+}
+.dark .flatpickr-days,
+.dark .dayContainer {
+  background: rgb(24 24 27);
+}
+.dark .flatpickr-day {
+  color: rgb(244 244 245);
+}
+.dark .flatpickr-day.flatpickr-disabled,
+.dark .flatpickr-day.prevMonthDay,
+.dark .flatpickr-day.nextMonthDay {
+  color: rgb(82 82 91);
+}
+.dark .flatpickr-day:hover,
+.dark .flatpickr-day:focus,
+.dark .flatpickr-day.today:hover {
+  background: rgb(63 63 70);
+  border-color: rgb(63 63 70);
+}
+.dark .flatpickr-day.today {
+  border-color: rgb(96 165 250);
+}
+.dark .flatpickr-day.selected,
+.dark .flatpickr-day.startRange,
+.dark .flatpickr-day.endRange,
+.dark .flatpickr-day.selected:hover {
+  background: rgb(37 99 235);
+  border-color: rgb(37 99 235);
+  color: rgb(255 255 255);
+}
+.dark .flatpickr-time {
+  background: rgb(24 24 27);
+  border-top-color: rgb(63 63 70);
+}
+.dark .flatpickr-time input,
+.dark .flatpickr-time .flatpickr-time-separator,
+.dark .flatpickr-time .flatpickr-am-pm {
+  color: rgb(244 244 245);
+  background: rgb(24 24 27);
+}
+.dark .flatpickr-time input:hover,
+.dark .flatpickr-time input:focus,
+.dark .flatpickr-time .flatpickr-am-pm:hover {
+  background: rgb(39 39 42);
+}
+.dark .flatpickr-confirm {
+  background: rgb(24 24 27);
+  border-top: 1px solid rgb(63 63 70);
+  color: rgb(244 244 245);
+  fill: rgb(244 244 245);
+}
+.dark .flatpickr-confirm:hover {
+  background: rgb(39 39 42);
+}
+
+/* Mobile-targeted flatpickr sizing. Larger touch targets on day
+   cells and time inputs (~44px-ish to match Apple HIG), and let
+   the calendar fill the dialog so it doesn't sit lonely in the
+   middle of a phone screen. */
+@media (max-width: 640px) {
+  .flatpickr-calendar {
+    width: 100%;
+    max-width: 100%;
+  }
+  .flatpickr-days,
+  .dayContainer {
+    width: 100%;
+    min-width: 0;
+    max-width: 100%;
+  }
+  .flatpickr-day {
+    height: 40px;
+    line-height: 40px;
+    max-width: none;
+  }
+  .flatpickr-time {
+    height: 48px;
+  }
+  .flatpickr-time input {
+    font-size: 1.05rem;
+  }
+  /* flatpickr hides spinner arrows until :hover by default. No
+     hover on touch devices, so the user has no obvious way to
+     change the time. Force opacity:1 and widen the chevrons so
+     they read as tappable buttons. */
+  .flatpickr-time .numInputWrapper span.arrowUp,
+  .flatpickr-time .numInputWrapper span.arrowDown {
+    opacity: 1;
+    width: 24px;
+  }
+}
+
+
+/* Custom picker footer: red-X cancel + green-tick confirm pair
+   replacing flatpickr's "OK ✓" button. Larger hit targets on
+   mobile via the @media block above. Icons are SVG strokes so
+   they pick up currentColor for theming. */
+.tw-fp-footer {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 1.5rem;
+  padding: 0.5rem 0;
+  border-top: 1px solid rgb(228 228 231);
+  background: rgb(255 255 255);
+}
+.dark .tw-fp-footer {
+  border-top-color: rgb(63 63 70);
+  background: rgb(24 24 27);
+}
+.tw-fp-footer button {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 40px;
+  height: 40px;
+  padding: 0;
+  border: 1px solid transparent;
+  border-radius: 9999px;
+  background: transparent;
+  cursor: pointer;
+  outline-offset: 2px;
+}
+.tw-fp-footer .tw-fp-confirm { color: rgb(22 163 74); }
+.tw-fp-footer .tw-fp-cancel  { color: rgb(220 38 38); }
+.tw-fp-footer .tw-fp-confirm:hover { background: rgb(220 252 231); }
+.tw-fp-footer .tw-fp-cancel:hover  { background: rgb(254 226 226); }
+.dark .tw-fp-footer .tw-fp-confirm:hover { background: rgba(22 101 52 / 0.4); }
+.dark .tw-fp-footer .tw-fp-cancel:hover  { background: rgba(127 29 29 / 0.4); }
+@media (max-width: 640px) {
+  .tw-fp-footer { padding: 0.75rem 0; }
+  .tw-fp-footer button { width: 48px; height: 48px; }
 }

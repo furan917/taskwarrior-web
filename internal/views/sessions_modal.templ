@@ -1,0 +1,548 @@
+package views
+
+import (
+	"fmt"
+	"net/url"
+	"strconv"
+	"time"
+
+	"github.com/furan917/taskwarrior-web/internal/tw"
+)
+
+// SessionGroup is one calendar day's worth of sessions, with its rolled-up
+// total duration shown in the date header. The grouping is local-zone-aware
+// (user's wall clock day, not UTC) so a session that crosses midnight in
+// UTC still appears under the day it actually felt like.
+type SessionGroup struct {
+	Date     time.Time // local-zone midnight of the day
+	Sessions []tw.Session
+	Total    time.Duration
+}
+
+// SessionsPage is the paginated, grouped view of a task's sessions handed
+// to the dialog template. NextOffset is the page-offset (in DAYS, not
+// sessions) the "Earlier days" button uses to request the next page; zero
+// when there's nothing more to load.
+type SessionsPage struct {
+	Groups        []SessionGroup
+	HasMore       bool
+	NextOffset    int    // day-offset for the next page, only meaningful when HasMore
+	DayFilter     string // when set, the view is scoped to this single day
+	FromTimesheet bool   // whether the dialog was entered from /timesheet
+}
+
+// SessionsModal is the retroactive time-tracking editor: a stacked
+// <dialog> that lets the user add, edit, or delete sessions on a task.
+//
+// Sessions are rendered newest-first, grouped by local-zone day with a
+// date header and rolled-up total per day. When the full history is
+// requested (no DayFilter), the list paginates by 14 days per page;
+// "Earlier days" at the bottom appends one page via HTMX outerHTML swap
+// on the button itself, leaving every already-rendered row intact (no
+// scroll-loss, no datetime-local input reset).
+//
+// Two entry points:
+//   - From the edit modal: top-left "Sessions (N)" trigger HTMX-GETs into
+//     #sessions-modal-slot; the edit modal stays open underneath.
+//   - From the timesheet: clicking a session row HTMX-GETs the same
+//     surface with day=YYYY-MM-DD scoping the view; FromTimesheet=true
+//     flips the header to show a left-chevron "Edit task" affordance.
+templ SessionsModal(csrf string, t tw.Task, page SessionsPage) {
+	@modalShell("sessions-modal") {
+		@SessionRowTemplate()
+		<form data-sessions-form data-task-id={ t.UUID } data-task-active={ activeFlag(t) } class="flex flex-col">
+			// Hidden _csrf input mirrors modal_edit's shape so the
+			// session-modal form has the same CSRF surface as every
+			// other write modal. The JS submit handler reads from
+			// this input as its primary source (meta tag as fallback)
+			// keeping the token strategy single-source.
+			<input type="hidden" name="_csrf" value={ csrf }/>
+			@sessionsHeader(t, page.FromTimesheet)
+			<div data-sessions-error class="empty:hidden mx-4 mt-3 rounded border border-red-200 bg-red-50 px-3 py-2 text-sm text-red-700 dark:border-red-800 dark:bg-red-950/40 dark:text-red-300"></div>
+			// Conflict panel - populated by sessions_modal.js when a save
+			// returns 422 with an overlap. Sits above the regular list
+			// so the user resolves conflicts without scrolling. Hidden
+			// while empty via Tailwind's empty: variant.
+			<div data-sessions-conflicts class="empty:hidden mx-4 mt-3 flex flex-col gap-3"></div>
+			if page.DayFilter != "" {
+				@sessionsDayFilterBar(t.UUID, page.DayFilter, totalSessionCount(page.Groups))
+			}
+			// Scrolling history. max-h-[50vh] keeps it from monopolising
+			// the dialog so the staging area below stays visible at all
+			// times - clicking Add doesn't require the user to leave
+			// whichever date they were inspecting.
+			<div data-sessions-list class="max-h-[50vh] overflow-y-auto px-4 py-3">
+				if len(page.Groups) == 0 {
+					@sessionsEmpty()
+				} else {
+					@sessionsGroupedList(t.UUID, page)
+				}
+			</div>
+			// Staging area: lives OUTSIDE the scroll container so the Add
+			// button and the new rows it spawns are always in view. New
+			// rows accumulate in [data-sessions-new] above the button; on
+			// Save they're submitted alongside the history rows because
+			// both share the data-session-row hook the submit handler
+			// iterates. Empty-state spacing is hidden via the
+			// `[&:not(:empty)]:` selector so the bar collapses cleanly
+			// when nothing is staged.
+			<div class="border-t border-zinc-200 px-4 py-3 dark:border-zinc-700">
+				<div data-sessions-new class="flex flex-col gap-2 [&:not(:empty)]:mb-3"></div>
+				<div class="flex flex-wrap items-center gap-2">
+					<button type="button" data-sessions-add class="inline-flex items-center gap-1 rounded border border-dashed border-zinc-300 px-3 py-1.5 text-sm text-zinc-600 hover:border-zinc-400 hover:bg-zinc-50 dark:border-zinc-600 dark:text-zinc-300 dark:hover:bg-zinc-800">
+						<span aria-hidden="true">+</span><span>Add entry</span>
+					</button>
+					if t.IsActive() {
+						// data-close-on-success closes the enclosing <dialog>
+						// via core_modal_close.js; the Stop handler emits
+						// HX-Trigger: refresh which core_refresh_modal.js
+						// picks up to re-fetch the task list / reload the
+						// page. One declarative attribute pair replaces the
+						// previous inline hx-on::after-request - keeps the
+						// CSP unsafe-eval relaxation defence-in-depth only.
+						<button
+							type="button"
+							hx-post={ taskStopURL(t) }
+							hx-swap="none"
+							data-close-on-success
+							class="inline-flex items-center gap-1 rounded bg-amber-600 px-3 py-1.5 text-sm font-medium text-white hover:bg-amber-700 focus:outline-none focus:ring-2 focus:ring-amber-500"
+							title="Stop tracking the active session"
+						>Stop tracking</button>
+					}
+				</div>
+			</div>
+			<div class="flex items-center justify-end gap-2 border-t border-zinc-200 px-4 py-3 dark:border-zinc-700">
+				<button type="button" data-dismiss-sessions class="rounded px-3 py-1.5 text-sm text-zinc-600 hover:bg-zinc-100 dark:text-zinc-300 dark:hover:bg-zinc-800">Cancel</button>
+				<button type="submit" class="rounded bg-blue-600 px-3 py-1.5 text-sm font-medium text-white hover:bg-blue-700 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:ring-offset-2 dark:focus:ring-offset-zinc-950">Save</button>
+			</div>
+		</form>
+	}
+}
+
+// SessionsListFragment renders ONLY the date-groups + an optional next-
+// page Load-more button. Used by the GET /forms/sessions/{id}?fragment=1
+// path so "Earlier days" can append more without re-rendering the whole
+// dialog. Returned content replaces the previous Load-more button via
+// hx-target="this" hx-swap="outerHTML".
+//
+// When this is the LAST page (no more days remain) we replace the absent
+// load-more button with a small "No more sessions" footer so the user
+// understands they've reached the bottom - otherwise the button just
+// vanishes mid-click, which reads as a broken interaction.
+templ SessionsListFragment(uuid string, page SessionsPage) {
+	@sessionsGroupedList(uuid, page)
+	if !page.HasMore {
+		<p class="mt-4 text-center text-xs italic text-zinc-500 dark:text-zinc-400">No more sessions</p>
+	}
+}
+
+// sessionsGroupedList renders the date headers + session rows for the
+// supplied page. Shared between SessionsModal and SessionsListFragment so
+// the rendered shape is identical whether the user opened the dialog
+// fresh or appended via "Earlier days".
+templ sessionsGroupedList(uuid string, page SessionsPage) {
+	for _, g := range page.Groups {
+		// Date header omitted when day-scoped: the dayFilter bar above the
+		// list already names the day. Skipping the header avoids the
+		// "Showing 3 sessions on 2026-05-12 / Mon 12 May - 30m" duplicate.
+		if page.DayFilter == "" {
+			@sessionDateHeader(g)
+		}
+		<div class="mt-1 flex flex-col gap-2">
+			for _, s := range g.Sessions {
+				@sessionRow(s)
+			}
+		</div>
+	}
+	if page.HasMore {
+		@sessionsLoadMore(uuid, page.NextOffset)
+	}
+}
+
+// sessionDateHeader is the per-day label with rolled-up duration.
+// position:sticky + top-0 makes it cling to the top of the scrolling
+// list as the user pages back through time (iOS list-section pattern).
+// Multiple stickies stack: as the next day-header crests the top, the
+// browser slides the previous one out under it - giving the "what am I
+// looking at" anchor without any JS.
+//
+// Opaque background (bg-white / dark:bg-zinc-900) matches the dialog
+// shell so scrolling content can't bleed through the sticky strip.
+// z-10 lifts above the session rows (which sit at the default z-0).
+templ sessionDateHeader(g SessionGroup) {
+	<div class="sticky top-0 z-10 -mx-4 flex items-baseline justify-between border-b border-zinc-200 bg-white px-4 pt-3 pb-1 first:pt-0 dark:border-zinc-700 dark:bg-zinc-900">
+		<span class="text-xs font-semibold uppercase tracking-wide text-zinc-600 dark:text-zinc-300">{ g.Date.Format("Mon 2 Jan 2006") }</span>
+		<span class="text-xs text-zinc-500 dark:text-zinc-400">{ formatElapsed(g.Total) }</span>
+	</div>
+}
+
+// sessionsLoadMore is the "Earlier days" button. Uses outerHTML on itself
+// so the server-returned fragment (a chunk of date-groups + the NEXT
+// load-more button, or nothing when exhausted) cleanly chains: each click
+// appends one page-worth of older days.
+templ sessionsLoadMore(uuid string, nextOffset int) {
+	<button
+		type="button"
+		data-load-more
+		hx-get={ sessionsLoadMoreURL(uuid, nextOffset) }
+		hx-target="this"
+		hx-swap="outerHTML"
+		class="mt-4 inline-flex w-full items-center justify-center gap-2 rounded border border-zinc-200 bg-zinc-50 px-3 py-2 text-sm font-medium text-zinc-600 hover:border-zinc-300 hover:bg-zinc-100 focus:outline-none focus:ring-2 focus:ring-blue-500 dark:border-zinc-700 dark:bg-zinc-800 dark:text-zinc-300 dark:hover:bg-zinc-700"
+	>
+		<svg class="h-3.5 w-3.5" viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+			<polyline points="6 9 10 13 14 9"></polyline>
+		</svg>
+		<span>Earlier days</span>
+	</button>
+}
+
+// sessionsLoadMoreURL builds the fragment-endpoint URL the load-more
+// button hits. ?fragment=1 tells the handler to skip the dialog chrome
+// and return only the new date-groups + optionally a next load-more
+// button.
+func sessionsLoadMoreURL(uuid string, offset int) string {
+	u := url.URL{Path: "/forms/sessions/" + uuid}
+	q := u.Query()
+	q.Set("fragment", "1")
+	q.Set("offset", strconv.Itoa(offset))
+	u.RawQuery = q.Encode()
+	return u.String()
+}
+
+// sessionsHeader builds the modal title bar. When entered from the
+// timesheet, prepends a left-chevron "Edit task" link so the user can
+// pivot to the full edit modal without retracing through the timesheet.
+// When entered from the edit modal, no chevron - Esc / Cancel returns
+// to it naturally.
+templ sessionsHeader(t tw.Task, fromTimesheet bool) {
+	<div class="flex items-center justify-between border-b border-zinc-200 px-4 py-3 dark:border-zinc-700">
+		<div class="flex items-center gap-2">
+			if fromTimesheet {
+				// data-close-on-success closes the enclosing <dialog>
+				// (the sessions modal) once the GET for the edit modal
+				// returns 200. core_dialog_open.js then opens the freshly-
+				// swapped edit modal via htmx:afterSettle. Sequence:
+				// sessions close → edit open. Same defence-in-depth CSP
+				// rationale as the Stop tracking button.
+				<button
+					type="button"
+					hx-get={ rowEditURL(t) }
+					hx-target="#modal"
+					data-close-on-success
+					class="inline-flex h-7 w-7 items-center justify-center rounded text-zinc-500 hover:bg-zinc-100 hover:text-zinc-900 focus:outline-none focus:ring-2 focus:ring-blue-500 dark:text-zinc-400 dark:hover:bg-zinc-800 dark:hover:text-zinc-100"
+					aria-label="Open task editor"
+					title="Edit task details"
+				>
+					<svg class="h-4 w-4" viewBox="0 0 20 20" fill="currentColor" aria-hidden="true">
+						<path d="M12.78 4.22a.75.75 0 010 1.06L7.06 11l5.72 5.72a.75.75 0 11-1.06 1.06l-6.25-6.25a.75.75 0 010-1.06l6.25-6.25a.75.75 0 011.06 0z"></path>
+					</svg>
+				</button>
+			}
+			<h2 class="text-base font-semibold">Tracked time <span class="font-normal text-zinc-500 dark:text-zinc-400">- { truncate(t.Description, 50) }</span></h2>
+		</div>
+		<button type="button" data-dismiss-sessions class="text-2xl leading-none text-zinc-400 hover:text-zinc-700 dark:text-zinc-500 dark:hover:text-zinc-200" aria-label="Close">×</button>
+	</div>
+}
+
+templ sessionsDayFilterBar(uuid, dayFilter string, count int) {
+	<div class="mx-4 mt-3 flex items-center justify-between rounded border border-blue-200 bg-blue-50 px-3 py-2 text-sm dark:border-blue-900/60 dark:bg-blue-950/40">
+		<span class="text-blue-900 dark:text-blue-200">
+			Showing { fmt.Sprintf("%d", count) } session(s) on <span class="font-medium">{ dayFilter }</span>
+		</span>
+		<button
+			type="button"
+			hx-get={ "/forms/sessions/" + uuid }
+			hx-target="#sessions-modal-slot"
+			hx-swap="innerHTML"
+			class="rounded border border-blue-300 bg-white px-2 py-0.5 text-xs font-medium text-blue-700 hover:bg-blue-100 dark:border-blue-700 dark:bg-zinc-900 dark:text-blue-300 dark:hover:bg-blue-950/60"
+		>Show all</button>
+	</div>
+}
+
+templ sessionRow(s tw.Session) {
+	// data-original-start / data-original-end carry the on-disk
+	// timestamps for the row's identity in the diff submission. They
+	// are emitted in RFC3339 UTC so the JS can compare them
+	// byte-for-byte against the resubmitted values to detect edits.
+	// An active interval has no end yet, so data-original-end is the
+	// empty string - the JS treats that as "open" when building the
+	// edit/delete keys.
+	<div data-session-row data-original-start={ rfc3339UTC(s.Start) } data-original-end={ rfc3339UTC(s.Stop) } class={ sessionRowClass(s) }>
+		<label class="flex flex-1 flex-col text-xs">
+			<span class="mb-0.5 text-zinc-500 dark:text-zinc-400">Start</span>
+			@sessionDateTimeInput("start", localDateTimeInput(s.Start), false)
+		</label>
+		<label class="flex flex-1 flex-col text-xs">
+			<span class="mb-0.5 text-zinc-500 dark:text-zinc-400">End</span>
+			if s.Stop.IsZero() {
+				// Active interval: the End input is disabled and shows a
+				// "Active" placeholder, which is invisible to screen readers
+				// because placeholders are not accessible names. The hidden
+				// helper text below is referenced via aria-describedby so
+				// the SR user understands why this control is non-editable.
+				@sessionActiveEndInput()
+				<span id="sessions-active-end-help" class="sr-only">Currently active. End time is recorded when you stop tracking.</span>
+			} else {
+				@sessionDateTimeInput("end", localDateTimeInput(s.Stop), false)
+			}
+		</label>
+		<div class="flex flex-col items-end gap-1">
+			<span class="text-[11px] text-zinc-500 dark:text-zinc-400" data-session-duration>{ sessionDurationLabel(s) }</span>
+			@sessionDeleteButton()
+		</div>
+	</div>
+}
+
+// sessionDeleteButton is the trash-icon button rendered next to each
+// session row. Extracted so the live-row markup (sessionRow) and the
+// staging-template markup (SessionRowTemplate) share one definition;
+// any class / icon change lands in both at once.
+templ sessionDeleteButton() {
+	<button
+		type="button"
+		data-session-delete
+		class="inline-flex h-7 w-7 items-center justify-center rounded text-zinc-400 hover:bg-red-50 hover:text-red-700 focus:outline-none focus:ring-2 focus:ring-red-500 dark:hover:bg-red-950/40 dark:hover:text-red-400"
+		aria-label="Delete session"
+		title="Delete session"
+	>
+		<svg class="h-4 w-4" viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+			<polyline points="3 6 5 6 17 6"></polyline>
+			<path d="m19 6-1.5 12.5a2 2 0 0 1-2 1.5h-7a2 2 0 0 1-2-1.5L5 6"></path>
+			<path d="M8 6V4a2 2 0 0 1 2-2h0a2 2 0 0 1 2 2v2"></path>
+		</svg>
+	</button>
+}
+
+// SessionRowTemplate is the staging-row blueprint embedded once per
+// SessionsModal render. sessions_modal.js's newSessionRow() clones
+// `tpl.content.firstElementChild` from this <template> rather than
+// hand-rolling matching HTML in JS. That keeps Tailwind class strings
+// and the SVG icon paths in a single source of truth: the templ.
+templ SessionRowTemplate() {
+	<template id="session-row-template">
+		<div data-session-row class="flex flex-col gap-2 rounded border border-zinc-200 bg-white p-3 sm:flex-row sm:items-end dark:border-zinc-800 dark:bg-zinc-900">
+			<label class="flex flex-1 flex-col text-xs">
+				<span class="mb-0.5 text-zinc-500 dark:text-zinc-400">Start</span>
+				@sessionDateTimeInput("start", "", false)
+			</label>
+			<label class="flex flex-1 flex-col text-xs">
+				<span class="mb-0.5 text-zinc-500 dark:text-zinc-400">End</span>
+				@sessionDateTimeInput("end", "", false)
+			</label>
+			<div class="flex flex-col items-end gap-1">
+				<span class="text-[11px] text-zinc-500 dark:text-zinc-400" data-session-duration></span>
+				@sessionDeleteButton()
+			</div>
+		</div>
+	</template>
+}
+
+// sessionDateTimeInput renders a Start/End text input wrapped with a
+// calendar-icon button. The wrap-mode contract mirrors
+// dateInputWithPicker: [data-session-fp] on the wrapper,
+// [data-session-start|end] + [data-input] on the field, [data-toggle]
+// on the icon. sessions_modal.js attaches flatpickr to the wrapper so
+// clicking either the input OR the icon opens the picker.
+//
+// `which` is "start" or "end" - controls the data-session-* hook the
+// submit handler reads from. The input is still type="datetime-local"
+// for progressive-enhancement; the JS swaps to type=text before
+// attaching flatpickr.
+templ sessionDateTimeInput(which, value string, required bool) {
+	<div class="relative" data-session-fp>
+		<input
+			type="datetime-local"
+			name={ which }
+			value={ value }
+			required?={ required || which == "start" }
+			data-input
+			data-session-start?={ which == "start" }
+			data-session-end?={ which == "end" }
+			class="w-full rounded border border-zinc-300 bg-white px-2 py-1 pr-8 text-sm text-zinc-900 focus:border-blue-500 focus:outline-none dark:border-zinc-600 dark:bg-zinc-800 dark:text-zinc-100"
+		/>
+		<button
+			type="button"
+			data-toggle
+			class="absolute right-1 top-1/2 -translate-y-1/2 inline-flex h-6 w-6 items-center justify-center rounded text-zinc-400 hover:bg-zinc-100 hover:text-zinc-700 focus:outline-none focus:ring-2 focus:ring-blue-500 dark:hover:bg-zinc-800 dark:hover:text-zinc-200"
+			aria-label="Pick date and time"
+			title="Pick date and time"
+		>
+			<svg class="h-3.5 w-3.5" viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+				<rect x="3" y="4" width="14" height="13" rx="2"></rect>
+				<path d="M3 8h14"></path>
+				<path d="M7 2v4"></path>
+				<path d="M13 2v4"></path>
+			</svg>
+		</button>
+	</div>
+}
+
+// sessionActiveEndInput is the disabled End slot shown when the
+// underlying interval is still active. No calendar icon (the picker
+// would have nothing useful to do on a disabled input).
+templ sessionActiveEndInput() {
+	<input
+		type="datetime-local"
+		name="end"
+		data-session-end
+		placeholder="Active"
+		disabled
+		aria-describedby="sessions-active-end-help"
+		class="w-full rounded border border-zinc-300 bg-white px-2 py-1 text-sm text-zinc-900 focus:border-blue-500 focus:outline-none disabled:bg-zinc-100 disabled:text-zinc-500 dark:border-zinc-600 dark:bg-zinc-800 dark:text-zinc-100 dark:disabled:bg-zinc-800/60"
+	/>
+}
+
+templ sessionsEmpty() {
+	<div class={ EmptyCardClass() + " p-6 text-center" }>
+		<p class="text-sm text-zinc-500 dark:text-zinc-400">No tracked time yet</p>
+		<p class="mt-1 text-xs text-zinc-400 dark:text-zinc-500">Click "Add entry" to log time worked</p>
+	</div>
+}
+
+func sessionRowClass(s tw.Session) string {
+	base := "flex flex-col gap-2 rounded border border-zinc-200 bg-white p-3 sm:flex-row sm:items-end dark:border-zinc-800 dark:bg-zinc-900"
+	if s.Stop.IsZero() {
+		return base + " border-l-4 border-l-amber-500 bg-amber-50/40 dark:bg-amber-950/20"
+	}
+	return base
+}
+
+func activeFlag(t tw.Task) string {
+	if t.IsActive() {
+		return "1"
+	}
+	return ""
+}
+
+// localDateTimeInput formats a local-zone timestamp in the
+// datetime-local input shape ("2006-01-02T15:04"). flatpickr on
+// desktop reads/writes the same format via dateFormat: "Y-m-dTH:i";
+// mobile devices use the input type natively (with their built-in
+// Done button) so the format must remain valid for both.
+func localDateTimeInput(t time.Time) string {
+	if t.IsZero() {
+		return ""
+	}
+	return t.Local().Format("2006-01-02T15:04")
+}
+
+// rfc3339UTC renders the timestamp in canonical UTC form for the
+// data-original-* attributes. Empty string for zero time so an active
+// interval ends up with data-original-end="" - the JS treats that as
+// the "open" sentinel when keying edits and deletes against the BE.
+// UTC is chosen so the round-trip is unambiguous regardless of the
+// user's local zone.
+func rfc3339UTC(t time.Time) string {
+	if t.IsZero() {
+		return ""
+	}
+	return t.UTC().Format(time.RFC3339)
+}
+
+func sessionDurationLabel(s tw.Session) string {
+	if s.Stop.IsZero() {
+		return "active"
+	}
+	return formatElapsed(s.Stop.Sub(s.Start))
+}
+
+func truncate(s string, max int) string {
+	if len(s) <= max {
+		return s
+	}
+	return s[:max-1] + "…"
+}
+
+// SessionsPageSize is the per-page day count for the editor's pagination.
+// Exported so the handler can match the templ's expectation without
+// rederiving the constant. Two weeks felt like the right cadence for a
+// time-tracking review: long enough to reduce clicks, short enough that
+// the rendered DOM stays light (typical 1-3 sessions per active day,
+// ~30 sessions / ~60 datetime-local inputs per page).
+const SessionsPageSize = 14
+
+// BuildSessionsPage takes the full session list (newest-first) and an
+// optional day filter and pagination offset, and returns the slice of
+// day-grouped sessions to render plus pagination metadata. Centralised
+// here so the handler stays a thin parse-and-dispatch shell and so the
+// fragment endpoint and the full-dialog render share one calculation.
+//
+// When dayFilter is set the result holds at most one SessionGroup
+// (the matching day) and HasMore is always false - day-scoped views
+// don't paginate.
+//
+// Sessions are assumed pre-sorted newest-first; this function does NOT
+// re-sort.
+func BuildSessionsPage(sessions []tw.Session, dayFilter string, fromTimesheet bool, offset int) SessionsPage {
+	page := SessionsPage{DayFilter: dayFilter, FromTimesheet: fromTimesheet}
+	if dayFilter != "" {
+		day, err := time.ParseInLocation("2006-01-02", dayFilter, time.Local)
+		if err != nil {
+			return page
+		}
+		dayEnd := day.AddDate(0, 0, 1)
+		var hits []tw.Session
+		for _, s := range sessions {
+			local := s.Start.Local()
+			if !local.Before(day) && local.Before(dayEnd) {
+				hits = append(hits, s)
+			}
+		}
+		page.Groups = groupSessionsByDay(hits)
+		return page
+	}
+
+	all := groupSessionsByDay(sessions)
+	if offset < 0 {
+		offset = 0
+	}
+	end := offset + SessionsPageSize
+	if end > len(all) {
+		end = len(all)
+	}
+	if offset < len(all) {
+		page.Groups = all[offset:end]
+	}
+	page.HasMore = end < len(all)
+	page.NextOffset = end
+	return page
+}
+
+// groupSessionsByDay buckets a session list (newest-first) into one entry
+// per local-zone calendar day, preserving newest-first order at both the
+// group and within-group level. Empty input yields nil.
+func groupSessionsByDay(sessions []tw.Session) []SessionGroup {
+	if len(sessions) == 0 {
+		return nil
+	}
+	now := time.Now()
+	type dayKey struct{ y, m, d int }
+	index := map[dayKey]int{}
+	var groups []SessionGroup
+	for _, s := range sessions {
+		local := s.Start.Local()
+		k := dayKey{local.Year(), int(local.Month()), local.Day()}
+		idx, ok := index[k]
+		if !ok {
+			idx = len(groups)
+			index[k] = idx
+			groups = append(groups, SessionGroup{
+				Date: time.Date(local.Year(), local.Month(), local.Day(), 0, 0, 0, 0, time.Local),
+			})
+		}
+		groups[idx].Sessions = append(groups[idx].Sessions, s)
+		groups[idx].Total += s.Duration(now)
+	}
+	return groups
+}
+
+// totalSessionCount sums sessions across all groups - used by the day
+// filter bar to show "Showing N sessions on YYYY-MM-DD" without the
+// template needing to know about group internals.
+func totalSessionCount(groups []SessionGroup) int {
+	n := 0
+	for _, g := range groups {
+		n += len(g.Sessions)
+	}
+	return n
+}

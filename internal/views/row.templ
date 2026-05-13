@@ -84,67 +84,75 @@ templ rowFrame(t tw.Task, done bool) {
 					}
 				</div>
 			</div>
-			<div class="hidden sm:block">
-				@Urgency(t.Urgency)
-			</div>
-			if done {
-				<button
-					type="button"
-					hx-delete={ taskURL(t) }
-					hx-swap="none"
-					hx-confirm="Delete this completed task?"
-					class="row-action-delete text-xs text-zinc-500 hover:text-red-700 dark:text-zinc-400 dark:hover:text-red-400"
-					title="Delete task"
-				>delete</button>
-			} else {
-				if !t.IsRecurringParent() {
-					if t.IsActive() {
-						<button
-							type="button"
-							hx-post={ taskStopURL(t) }
-							hx-swap="none"
-							class="row-action-stop inline-flex h-7 w-7 flex-none items-center justify-center rounded-full text-amber-600 hover:bg-amber-50 hover:text-amber-700 dark:text-amber-400 dark:hover:bg-amber-950/40 dark:hover:text-amber-300"
-							title="Stop tracking"
-							aria-label="Stop tracking this task"
-						>
-							<svg class="h-3 w-3" viewBox="0 0 20 20" fill="currentColor" aria-hidden="true"><rect x="4" y="4" width="12" height="12" rx="1"></rect></svg>
-						</button>
-					} else {
-						<button
-							type="button"
-							hx-post={ taskStartURL(t) }
-							hx-swap="none"
-							class="row-action-start inline-flex h-7 w-7 flex-none items-center justify-center rounded-full text-zinc-400 hover:bg-emerald-50 hover:text-emerald-600 dark:text-zinc-500 dark:hover:bg-emerald-950/40 dark:hover:text-emerald-400"
-							title="Start tracking"
-							aria-label="Start tracking this task"
-						>
-							<svg class="h-3 w-3" viewBox="0 0 20 20" fill="currentColor" aria-hidden="true"><polygon points="6 4 16 10 6 16"></polygon></svg>
-						</button>
+			// Action cluster: urgency bar + start/stop + edit + chevron grouped
+			// into a single items-center flex container with self-center so
+			// they share a centreline that sits at the row's vertical middle.
+			// Without this wrapper the bare h-1.5 urgency bar at items-start
+			// pinned to the top edge while the h-7 buttons sat further down,
+			// reading as two visually-disjoint rows.
+			<div class="flex flex-none items-center gap-3 self-center">
+				<div class="hidden sm:block">
+					@Urgency(t.Urgency)
+				</div>
+				if done {
+					<button
+						type="button"
+						hx-delete={ taskURL(t) }
+						hx-swap="none"
+						hx-confirm="Delete this completed task?"
+						class="row-action-delete text-xs text-zinc-500 hover:text-red-700 dark:text-zinc-400 dark:hover:text-red-400"
+						title="Delete task"
+					>delete</button>
+				} else {
+					if !t.IsRecurringParent() {
+						if t.IsActive() {
+							<button
+								type="button"
+								hx-post={ taskStopURL(t) }
+								hx-swap="none"
+								class="row-action-stop inline-flex h-7 w-7 flex-none items-center justify-center rounded-full text-amber-600 hover:bg-amber-50 hover:text-amber-700 dark:text-amber-400 dark:hover:bg-amber-950/40 dark:hover:text-amber-300"
+								title="Stop tracking"
+								aria-label="Stop tracking this task"
+							>
+								<svg class="h-3 w-3" viewBox="0 0 20 20" fill="currentColor" aria-hidden="true"><rect x="4" y="4" width="12" height="12" rx="1"></rect></svg>
+							</button>
+						} else {
+							<button
+								type="button"
+								hx-post={ taskStartURL(t) }
+								hx-swap="none"
+								class="row-action-start inline-flex h-7 w-7 flex-none items-center justify-center rounded-full text-zinc-400 hover:bg-emerald-50 hover:text-emerald-600 dark:text-zinc-500 dark:hover:bg-emerald-950/40 dark:hover:text-emerald-400"
+								title="Start tracking"
+								aria-label="Start tracking this task"
+							>
+								<svg class="h-3 w-3" viewBox="0 0 20 20" fill="currentColor" aria-hidden="true"><polygon points="6 4 16 10 6 16"></polygon></svg>
+							</button>
+						}
 					}
+					<button
+						type="button"
+						hx-get={ rowEditURL(t) }
+						hx-target="#modal"
+						class="row-action-edit text-xs text-zinc-500 hover:text-zinc-900 dark:text-zinc-400 dark:hover:text-zinc-100"
+						title="Edit task"
+					>edit</button>
 				}
+				// aria-expanded="false" is the initial state; the row-toggle click
+				// handler in app.js (Row info expand/collapse IIFE) flips it on
+				// open/close - same pattern as the form-error swap target where
+				// the JS owns the post-hydration attribute.
 				<button
 					type="button"
-					hx-get={ rowEditURL(t) }
-					hx-target="#modal"
-					class="row-action-edit text-xs text-zinc-500 hover:text-zinc-900 dark:text-zinc-400 dark:hover:text-zinc-100"
-					title="Edit task"
-				>edit</button>
-			}
-			// aria-expanded="false" is the initial state; the row-toggle click
-			// handler in app.js (Row info expand/collapse IIFE) flips it on
-			// open/close - same pattern as the form-error swap target where
-			// the JS owns the post-hydration attribute.
-			<button
-				type="button"
-				class="row-toggle inline-flex h-7 w-7 flex-none items-center justify-center rounded-full text-zinc-400 hover:bg-zinc-100 hover:text-zinc-900 dark:text-zinc-500 dark:hover:bg-zinc-800 dark:hover:text-zinc-100"
-				aria-label="Expand task details"
-				aria-expanded="false"
-				title="Show task details"
-			>
-				<svg class="row-chevron h-4 w-4 transition-transform duration-150" viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
-					<polyline points="7 5 13 10 7 15"></polyline>
-				</svg>
-			</button>
+					class="row-toggle inline-flex h-7 w-7 flex-none items-center justify-center rounded-full text-zinc-400 hover:bg-zinc-100 hover:text-zinc-900 dark:text-zinc-500 dark:hover:bg-zinc-800 dark:hover:text-zinc-100"
+					aria-label="Expand task details"
+					aria-expanded="false"
+					title="Show task details"
+				>
+					<svg class="row-chevron h-4 w-4 transition-transform duration-150" viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+						<polyline points="7 5 13 10 7 15"></polyline>
+					</svg>
+				</button>
+			</div>
 		</div>
 		<div class="row-details hidden border-t border-zinc-200 px-3 py-3 text-xs text-zinc-600 dark:border-zinc-700 dark:text-zinc-400">
 			@rowDetailGrid(t)
@@ -261,10 +269,11 @@ templ rowDetailGrid(t tw.Task) {
 				}
 			}
 		}
-		if len(t.Annotations) > 0 {
+		{{ notes := userNotes(t.Annotations) }}
+		if len(notes) > 0 {
 			@detailRow("Notes", "long") {
 				<div class="space-y-0.5">
-					for _, a := range t.Annotations {
+					for _, a := range notes {
 						<div>
 							@Linkify(a.Description)
 						</div>

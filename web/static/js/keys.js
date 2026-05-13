@@ -9,13 +9,6 @@
 (function () {
   const FOCUS_CLASS = 'row-focused';
 
-  // Inject the focus style here so we don't have to touch tailwind.input.css
-  // or any of the templ files that render rows.
-  const style = document.createElement('style');
-  style.textContent =
-    '.' + FOCUS_CLASS + '{outline:2px solid #3b82f6;outline-offset:2px;background-color:#eff6ff;}';
-  document.head.appendChild(style);
-
   let focusedId = null; // e.g. "task-<uuid>"; null = nothing focused yet.
 
   function rows() {

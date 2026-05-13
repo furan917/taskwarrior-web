@@ -2,6 +2,7 @@ package tw
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"os"
 	"os/exec"
@@ -1201,5 +1202,389 @@ func TestIsNoOpExit(t *testing.T) {
 				t.Errorf("IsNoOpExit(%v) = %v, want %v", c.err, got, c.wantNo)
 			}
 		})
+	}
+}
+
+// ── Import + UpdateIntervals ─────────────────────────────────────────────────
+
+// TestClient_Import_PipesStdinAndClassifiesErrors checks the two contractual
+// behaviours of Import: stdin actually reaches the spawned `task` (we have
+// the fake echo it back via a temp file we control) and a non-zero exit
+// rolls up into TaskExitError with stderr captured.
+func TestClient_Import_PipesStdinAndClassifiesErrors(t *testing.T) {
+	stdinSink := filepath.Join(t.TempDir(), "stdin")
+	// First-pass fake: succeeds, writes stdin to a sidecar file so the test
+	// can assert what reached the subprocess.
+	body := "#!/bin/sh\ncat - > '" + stdinSink + "'\nexit 0\n"
+	installScript(t, body)
+	c := NewClient()
+	payload := []byte(`[{"uuid":"11111111-2222-3333-4444-555555555555","description":"x","status":"pending","entry":"20260101T120000Z"}]`)
+	if err := c.Import(context.Background(), payload); err != nil {
+		t.Fatalf("Import: %v", err)
+	}
+	got, err := os.ReadFile(stdinSink)
+	if err != nil {
+		t.Fatalf("read stdin sink: %v", err)
+	}
+	if string(got) != string(payload) {
+		t.Errorf("stdin did not round-trip: got %q want %q", string(got), string(payload))
+	}
+
+	// Second-pass fake: exits 2, writes a chunk to stderr. Confirms the
+	// TaskExitError classification path (mirrors how runRaw handles it).
+	bad := "#!/bin/sh\ncat - >/dev/null\necho 'mock parse error' >&2\nexit 2\n"
+	installScript(t, bad)
+	err = c.Import(context.Background(), payload)
+	if err == nil {
+		t.Fatal("expected non-nil error on exit 2")
+	}
+	var te *TaskExitError
+	if !errors.As(err, &te) {
+		t.Fatalf("expected TaskExitError, got %T: %v", err, err)
+	}
+	if te.ExitCode != 2 {
+		t.Errorf("exit code: got %d want 2", te.ExitCode)
+	}
+	if !strings.Contains(te.Stderr, "mock parse error") {
+		t.Errorf("stderr not captured: got %q", te.Stderr)
+	}
+}
+
+// updateIntervalsFixture returns a fake-task script body that exports
+// the given annotation list for any `export` invocation and captures
+// the stdin of any `import` invocation into the given file. taskActive
+// (caller arg, not in the fixture) is the value passed to
+// UpdateIntervals at the call site.
+func updateIntervalsFixture(annotationsJSON, capturedPath string) string {
+	return `#!/bin/sh
+case "$*" in
+  *export*)
+    cat <<JSON
+[{
+  "id": 1,
+  "uuid": "11111111-2222-3333-4444-555555555555",
+  "description": "fixture",
+  "status": "pending",
+  "entry": "20260101T100000Z",
+  "annotations": ` + annotationsJSON + `
+}]
+JSON
+    ;;
+  *import*)
+    cat - > '` + capturedPath + `'
+    ;;
+esac
+exit 0
+`
+}
+
+// readImportedAnns loads the captured stdin from updateIntervalsFixture
+// and pulls the annotations of the single imported task. Fails the
+// test if the file is missing, malformed, or doesn't contain exactly
+// one record.
+func readImportedAnns(t *testing.T, captured string) []Annotation {
+	t.Helper()
+	raw, err := os.ReadFile(captured)
+	if err != nil {
+		t.Fatalf("read captured import: %v", err)
+	}
+	var got []Task
+	if err := json.Unmarshal(raw, &got); err != nil {
+		t.Fatalf("unmarshal captured import: %v\nbody=%s", err, string(raw))
+	}
+	if len(got) != 1 {
+		t.Fatalf("expected 1 imported record, got %d", len(got))
+	}
+	return got[0].Annotations
+}
+
+// TestClient_UpdateIntervals_PreservesUnsubmittedJournalPairs is the
+// critical regression test for the data-loss bug that motivated this
+// refactor. A diff with one delete and one create against a task that
+// has TWO existing pairs must leave the unreferenced pair intact -
+// the previous ReplaceIntervals approach would have silently destroyed
+// it because the FE sent a partial view.
+func TestClient_UpdateIntervals_PreservesUnsubmittedJournalPairs(t *testing.T) {
+	captured := filepath.Join(t.TempDir(), "import.json")
+	anns := `[
+		{"entry": "20260105T090000Z", "description": "Started task"},
+		{"entry": "20260105T100000Z", "description": "Stopped task"},
+		{"entry": "20260106T140000Z", "description": "Started task"},
+		{"entry": "20260106T150000Z", "description": "Stopped task"}
+	]`
+	installScript(t, updateIntervalsFixture(anns, captured))
+	c := NewClient()
+	// Delete the 2026-01-05 pair; add nothing else. The 2026-01-06
+	// pair MUST survive.
+	deletes := []IntervalDelete{{
+		OriginalStart: time.Date(2026, 1, 5, 9, 0, 0, 0, time.UTC),
+		OriginalEnd:   time.Date(2026, 1, 5, 10, 0, 0, 0, time.UTC),
+	}}
+	if err := c.UpdateIntervals(context.Background(), "11111111-2222-3333-4444-555555555555", nil, nil, deletes, false); err != nil {
+		t.Fatalf("UpdateIntervals: %v", err)
+	}
+	gotAnns := readImportedAnns(t, captured)
+	// Should have exactly the 2026-01-06 pair left, nothing else.
+	wantEntries := map[string]string{
+		"20260106T140000Z": JournalStartDescription,
+		"20260106T150000Z": JournalStopDescription,
+	}
+	if len(gotAnns) != len(wantEntries) {
+		t.Fatalf("annotation count: got %d want %d; got=%+v", len(gotAnns), len(wantEntries), gotAnns)
+	}
+	for _, a := range gotAnns {
+		want, ok := wantEntries[a.Entry]
+		if !ok {
+			t.Errorf("unexpected annotation entry %q (full=%+v)", a.Entry, a)
+			continue
+		}
+		if a.Description != want {
+			t.Errorf("entry %q: description got %q want %q", a.Entry, a.Description, want)
+		}
+	}
+}
+
+// TestClient_UpdateIntervals_PreservesCustomAnnotations: user-authored
+// notes pass through untouched even when journal annotations are being
+// rewritten around them.
+func TestClient_UpdateIntervals_PreservesCustomAnnotations(t *testing.T) {
+	captured := filepath.Join(t.TempDir(), "import.json")
+	anns := `[
+		{"entry": "20260105T090000Z", "description": "Started task"},
+		{"entry": "20260105T100000Z", "description": "Stopped task"},
+		{"entry": "20260106T120000Z", "description": "called supplier"}
+	]`
+	installScript(t, updateIntervalsFixture(anns, captured))
+	c := NewClient()
+	// Replace the 2026-01-05 pair with a 2026-01-08 09:00-09:30 pair.
+	edits := []IntervalEdit{{
+		OriginalStart: time.Date(2026, 1, 5, 9, 0, 0, 0, time.UTC),
+		OriginalEnd:   time.Date(2026, 1, 5, 10, 0, 0, 0, time.UTC),
+		Start:         time.Date(2026, 1, 8, 9, 0, 0, 0, time.UTC),
+		Stop:          time.Date(2026, 1, 8, 9, 30, 0, 0, time.UTC),
+	}}
+	if err := c.UpdateIntervals(context.Background(), "11111111-2222-3333-4444-555555555555", edits, nil, nil, false); err != nil {
+		t.Fatalf("UpdateIntervals: %v", err)
+	}
+	gotAnns := readImportedAnns(t, captured)
+	if len(gotAnns) != 3 {
+		t.Fatalf("annotation count: got %d want 3; got=%+v", len(gotAnns), gotAnns)
+	}
+	var sawCustom, sawNewStart, sawNewStop bool
+	for _, a := range gotAnns {
+		switch {
+		case a.Description == "called supplier":
+			sawCustom = true
+		case a.Description == JournalStartDescription && a.Entry == "20260108T090000Z":
+			sawNewStart = true
+		case a.Description == JournalStopDescription && a.Entry == "20260108T093000Z":
+			sawNewStop = true
+		case a.Entry == "20260105T090000Z" || a.Entry == "20260105T100000Z":
+			t.Errorf("edited pair's original timestamp survived: %+v", a)
+		}
+	}
+	if !sawCustom {
+		t.Error("user annotation 'called supplier' was stripped")
+	}
+	if !sawNewStart || !sawNewStop {
+		t.Errorf("edit's new annotations missing: start=%v stop=%v", sawNewStart, sawNewStop)
+	}
+}
+
+// TestClient_UpdateIntervals_CreateOnly verifies that a pure-create
+// diff appends the new pair without touching any existing pair.
+func TestClient_UpdateIntervals_CreateOnly(t *testing.T) {
+	captured := filepath.Join(t.TempDir(), "import.json")
+	anns := `[
+		{"entry": "20260105T090000Z", "description": "Started task"},
+		{"entry": "20260105T100000Z", "description": "Stopped task"}
+	]`
+	installScript(t, updateIntervalsFixture(anns, captured))
+	c := NewClient()
+	creates := []IntervalCreate{{
+		Start: time.Date(2026, 1, 8, 9, 0, 0, 0, time.UTC),
+		Stop:  time.Date(2026, 1, 8, 9, 30, 0, 0, time.UTC),
+	}}
+	if err := c.UpdateIntervals(context.Background(), "11111111-2222-3333-4444-555555555555", nil, creates, nil, false); err != nil {
+		t.Fatalf("UpdateIntervals: %v", err)
+	}
+	gotAnns := readImportedAnns(t, captured)
+	if len(gotAnns) != 4 {
+		t.Fatalf("annotation count: got %d want 4; got=%+v", len(gotAnns), gotAnns)
+	}
+	// Final list must be sorted by entry timestamp.
+	for i := 1; i < len(gotAnns); i++ {
+		if gotAnns[i-1].Entry > gotAnns[i].Entry {
+			t.Errorf("annotations not sorted by entry: %+v", gotAnns)
+			break
+		}
+	}
+}
+
+// TestClient_UpdateIntervals_DeleteOpenInterval confirms that deleting
+// an active (no-end) pair targets the Started-without-Stopped pair
+// via (OriginalStart, zero OriginalEnd) keying.
+func TestClient_UpdateIntervals_DeleteOpenInterval(t *testing.T) {
+	captured := filepath.Join(t.TempDir(), "import.json")
+	anns := `[
+		{"entry": "20260105T090000Z", "description": "Started task"},
+		{"entry": "20260105T100000Z", "description": "Stopped task"},
+		{"entry": "20260106T140000Z", "description": "Started task"}
+	]`
+	installScript(t, updateIntervalsFixture(anns, captured))
+	c := NewClient()
+	// Delete the open pair (started at 2026-01-06 14:00, no stop).
+	deletes := []IntervalDelete{{
+		OriginalStart: time.Date(2026, 1, 6, 14, 0, 0, 0, time.UTC),
+		// OriginalEnd left zero - identifies the open pair.
+	}}
+	if err := c.UpdateIntervals(context.Background(), "11111111-2222-3333-4444-555555555555", nil, nil, deletes, true); err != nil {
+		t.Fatalf("UpdateIntervals: %v", err)
+	}
+	gotAnns := readImportedAnns(t, captured)
+	if len(gotAnns) != 2 {
+		t.Fatalf("annotation count: got %d want 2; got=%+v", len(gotAnns), gotAnns)
+	}
+	for _, a := range gotAnns {
+		if a.Entry == "20260106T140000Z" {
+			t.Errorf("open Started annotation survived delete: %+v", a)
+		}
+	}
+}
+
+// TestClient_UpdateIntervals_UnmatchedKeyIsNoOp: when an edit or
+// delete names an Original* pair that no longer exists (out-of-band
+// CLI removed it), the operation is silently dropped rather than
+// erroring. This keeps a stale FE tab from being unable to save.
+func TestClient_UpdateIntervals_UnmatchedKeyIsNoOp(t *testing.T) {
+	captured := filepath.Join(t.TempDir(), "import.json")
+	anns := `[
+		{"entry": "20260105T090000Z", "description": "Started task"},
+		{"entry": "20260105T100000Z", "description": "Stopped task"}
+	]`
+	installScript(t, updateIntervalsFixture(anns, captured))
+	c := NewClient()
+	deletes := []IntervalDelete{{
+		// This pair does not exist in the fixture.
+		OriginalStart: time.Date(2025, 1, 1, 0, 0, 0, 0, time.UTC),
+		OriginalEnd:   time.Date(2025, 1, 1, 1, 0, 0, 0, time.UTC),
+	}}
+	if err := c.UpdateIntervals(context.Background(), "11111111-2222-3333-4444-555555555555", nil, nil, deletes, false); err != nil {
+		t.Fatalf("UpdateIntervals: %v", err)
+	}
+	gotAnns := readImportedAnns(t, captured)
+	if len(gotAnns) != 2 {
+		t.Errorf("unmatched delete should be a no-op, leaving 2 anns; got %d (%+v)", len(gotAnns), gotAnns)
+	}
+}
+
+// TestClient_UpdateIntervals_ValidatesOverlapFinalState checks that
+// the cross-state overlap check sees the FULL final state, not just
+// the diff. A create that overlaps with an EXISTING (unsubmitted)
+// pair must be rejected with ErrIntervalOverlap - the previous full-
+// replace had no way to detect this case.
+func TestClient_UpdateIntervals_ValidatesOverlapFinalState(t *testing.T) {
+	captured := filepath.Join(t.TempDir(), "import.json")
+	anns := `[
+		{"entry": "20260105T090000Z", "description": "Started task"},
+		{"entry": "20260105T110000Z", "description": "Stopped task"}
+	]`
+	installScript(t, updateIntervalsFixture(anns, captured))
+	c := NewClient()
+	// New pair 10:00-12:00 overlaps with existing 09:00-11:00.
+	creates := []IntervalCreate{{
+		Start: time.Date(2026, 1, 5, 10, 0, 0, 0, time.UTC),
+		Stop:  time.Date(2026, 1, 5, 12, 0, 0, 0, time.UTC),
+	}}
+	err := c.UpdateIntervals(context.Background(), "11111111-2222-3333-4444-555555555555", nil, creates, nil, false)
+	if !errors.Is(err, ErrIntervalOverlap) {
+		t.Fatalf("expected ErrIntervalOverlap, got %v", err)
+	}
+	// Nothing imported on validation failure.
+	if _, statErr := os.Stat(captured); statErr == nil {
+		t.Errorf("import file should not exist when validation fails")
+	}
+}
+
+// TestClient_UpdateIntervals_MultipleOpen rejects a diff that would
+// leave more than one open interval (single-running-session
+// invariant).
+func TestClient_UpdateIntervals_MultipleOpen(t *testing.T) {
+	captured := filepath.Join(t.TempDir(), "import.json")
+	anns := `[
+		{"entry": "20260105T090000Z", "description": "Started task"}
+	]`
+	installScript(t, updateIntervalsFixture(anns, captured))
+	c := NewClient()
+	// Add a second open pair while the existing one is still open.
+	creates := []IntervalCreate{{
+		Start: time.Date(2026, 1, 6, 9, 0, 0, 0, time.UTC),
+		// Stop zero -> open
+	}}
+	err := c.UpdateIntervals(context.Background(), "11111111-2222-3333-4444-555555555555", nil, creates, nil, true)
+	if !errors.Is(err, ErrMultipleOpenIntervals) {
+		t.Fatalf("expected ErrMultipleOpenIntervals, got %v", err)
+	}
+}
+
+// TestClient_UpdateIntervals_OpenRequiresActive rejects an open
+// interval on an inactive task. Without an Active task, ParseSessions
+// would drop the dangling Started as an orphan, hiding it from the
+// editor on next render.
+func TestClient_UpdateIntervals_OpenRequiresActive(t *testing.T) {
+	captured := filepath.Join(t.TempDir(), "import.json")
+	anns := `[]`
+	installScript(t, updateIntervalsFixture(anns, captured))
+	c := NewClient()
+	creates := []IntervalCreate{{
+		Start: time.Date(2026, 1, 5, 9, 0, 0, 0, time.UTC),
+	}}
+	err := c.UpdateIntervals(context.Background(), "11111111-2222-3333-4444-555555555555", nil, creates, nil, false /* not active */)
+	if !errors.Is(err, ErrOpenIntervalRequiresActive) {
+		t.Fatalf("expected ErrOpenIntervalRequiresActive, got %v", err)
+	}
+}
+
+// TestClient_UpdateIntervals_RejectsIDRace: same shape as the prior
+// ReplaceIntervals guard - export returns the wrong number of
+// records.
+func TestClient_UpdateIntervals_RejectsIDRace(t *testing.T) {
+	body := "#!/bin/sh\ncase \"$*\" in *export*) echo '[]';; esac\nexit 0\n"
+	installScript(t, body)
+	c := NewClient()
+	err := c.UpdateIntervals(context.Background(), "11111111-2222-3333-4444-555555555555", nil, nil, nil, false)
+	if !errors.Is(err, ErrInvalid) {
+		t.Fatalf("expected ErrInvalid for empty export, got %v", err)
+	}
+}
+
+// TestClient_UpdateIntervals_RejectsBadID: ID validation runs before
+// any subprocess.
+func TestClient_UpdateIntervals_RejectsBadID(t *testing.T) {
+	c := NewClient()
+	for _, id := range []string{"", "abc", "1; ls", "../etc", "1 2"} {
+		err := c.UpdateIntervals(context.Background(), id, nil, nil, nil, false)
+		if !errors.Is(err, ErrInvalid) {
+			t.Errorf("bad id %q: expected ErrInvalid, got %v", id, err)
+		}
+	}
+}
+
+// TestApplyIntervalDiff_EmptyDiffPreservesEverything is the pure-
+// function unit test for the diff helper: an empty diff against any
+// existing annotations must produce the same annotations (re-paired
+// and re-sorted, but the same set).
+func TestApplyIntervalDiff_EmptyDiffPreservesEverything(t *testing.T) {
+	existing := []Annotation{
+		{Entry: "20260105T090000Z", Description: JournalStartDescription},
+		{Entry: "20260105T100000Z", Description: JournalStopDescription},
+		{Entry: "20260106T120000Z", Description: "called supplier"},
+	}
+	got, err := applyIntervalDiff(existing, nil, nil, nil)
+	if err != nil {
+		t.Fatalf("applyIntervalDiff: %v", err)
+	}
+	if len(got) != 3 {
+		t.Fatalf("annotation count: got %d want 3; got=%+v", len(got), got)
 	}
 }

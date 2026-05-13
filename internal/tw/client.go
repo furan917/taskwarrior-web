@@ -59,6 +59,14 @@ type Client struct {
 	// adequate here (the discovery caches above use TTL because they're
 	// derived from task data which DOES change).
 	filterCache sync.Map // string -> *filterEntry
+
+	// importMu serialises the export-mutate-import critical section in
+	// ReplaceIntervals so two concurrent edits on the same task can't
+	// race-overwrite each other (the second's Export wouldn't see the
+	// first's not-yet-imported writes). Single-user threat model means
+	// the practical contention is near-zero, but the cost of holding the
+	// mutex is trivial against the subprocess latency it gates.
+	importMu sync.Mutex
 }
 
 type filterEntry struct {
@@ -257,6 +265,640 @@ func (c *Client) Duplicate(ctx context.Context, id string) error {
 		return fmt.Errorf("%w: id %q", ErrInvalid, id)
 	}
 	return c.Run(ctx, id, "duplicate")
+}
+
+// IntervalEdit describes a change to an existing on-disk interval.
+// Identity is the on-disk timestamp pair (OriginalStart, OriginalEnd) -
+// the same pair ParseSessions would emit for that journal-annotation
+// pair. OriginalEnd is the zero time for an active (open) interval -
+// only a Started annotation exists, no Stopped yet.
+type IntervalEdit struct {
+	OriginalStart time.Time
+	OriginalEnd   time.Time
+	Start         time.Time
+	Stop          time.Time // zero -> the edited interval is left open
+}
+
+// IntervalCreate is a brand new interval to record on the task.
+type IntervalCreate struct {
+	Start time.Time
+	Stop  time.Time // zero -> active / open
+}
+
+// IntervalDelete removes an existing interval. Identity matches
+// IntervalEdit's Original* fields.
+type IntervalDelete struct {
+	OriginalStart time.Time
+	OriginalEnd   time.Time
+}
+
+// Sentinel validation errors returned by UpdateIntervals. The handler
+// inspects them via errors.Is to map onto user-facing HTTP errors. We
+// keep them typed (not just string-wrapping) so the handler isn't
+// forced into substring matching against error messages, which rots
+// silently when phrasing changes.
+var (
+	// ErrIntervalOverlap is returned when the resulting state would
+	// contain two intervals whose [Start, Stop) ranges intersect.
+	ErrIntervalOverlap = errors.New("intervals overlap")
+	// ErrMultipleOpenIntervals: at most one open (no-end) interval
+	// is permitted per task. ParseSessions can only meaningfully
+	// surface one as "currently active"; the rest would be orphans.
+	ErrMultipleOpenIntervals = errors.New("at most one open interval permitted")
+	// ErrOpenIntervalRequiresActive: an open interval is only valid
+	// when the task is currently being tracked (task.Start set).
+	// Otherwise the dangling Started annotation has no logical
+	// matching Stopped and ParseSessions would drop it.
+	ErrOpenIntervalRequiresActive = errors.New("open interval requires task to be active")
+)
+
+// UpdateIntervals applies a DIFF to the task's time-tracking history,
+// rather than replacing the whole history. Each existing journal
+// pair is identified by its on-disk (StartedAt, StoppedAt) timestamps;
+// edits and deletes target specific pairs by that key, creates add
+// new pairs, and any existing pair NOT referenced by an edit/delete
+// is left exactly as it was.
+//
+// This is the safe primitive for a paginated editor: the FE can
+// submit changes to a subset of rows without that submission
+// implicitly meaning "delete every other interval on this task".
+// The previous full-replace `ReplaceIntervals` was a data-loss
+// footgun when paired with FE pagination - it took out everything
+// the FE didn't happen to have loaded.
+//
+// Behaviour:
+//   - Non-journal annotations (user notes) pass through untouched.
+//   - Journal pairs are re-paired greedily from sorted Started/
+//     Stopped lists, mirroring ParseSessions' read-side pairing so
+//     the keying scheme matches what the FE rendered. Orphan stops
+//     are dropped (same as ParseSessions).
+//   - Edits/deletes whose Original* key matches no existing pair are
+//     silently no-ops (the pair was already gone, e.g. an out-of-
+//     band CLI invocation removed it between FE render and submit).
+//   - Final annotation list is sorted by entry timestamp so the next
+//     ParseSessions sees a canonical order.
+//
+// Validation: cross-state invariants (overlap, single-open-only,
+// open-only-when-active) are checked AFTER applying the diff so the
+// result reflects the user's intended end state regardless of which
+// of the existing/created/edited intervals contribute to the
+// conflict. Per-item shape checks (zero start, etc.) are also done
+// here; the HTTP handler still validates user-input shape (future
+// dates, end-before-start) at the request boundary, but this method
+// must remain safe to call from any future internal path.
+//
+// Concurrency: the existing importMu serialises export → mutate →
+// import so two concurrent saves on the same task can't race.
+// Single-record `task import` is atomic per the TW docs, so a parse
+// failure aborts before any commit.
+//
+// `task undo` rollback: the entire mutation is a single `task
+// import` operation, so undo reverses it cleanly - same as the
+// prior ReplaceIntervals approach.
+func (c *Client) UpdateIntervals(ctx context.Context, id string, edits []IntervalEdit, creates []IntervalCreate, deletes []IntervalDelete, taskActive bool) error {
+	if !IDPattern.MatchString(id) {
+		return fmt.Errorf("%w: id %q", ErrInvalid, id)
+	}
+	for _, cr := range creates {
+		if cr.Start.IsZero() {
+			return fmt.Errorf("%w: create has zero start", ErrInvalid)
+		}
+	}
+	for _, e := range edits {
+		if e.Start.IsZero() {
+			return fmt.Errorf("%w: edit has zero new start", ErrInvalid)
+		}
+	}
+
+	c.importMu.Lock()
+	defer c.importMu.Unlock()
+
+	// Round-trip the EXPORT BYTES through a json.RawMessage map rather
+	// than the typed Task struct. Typed round-trip leaks two bugs:
+	//   1. Task.UDAs is map[string]string so numeric / boolean UDA
+	//      values get stringified on re-marshal.
+	//   2. Task.ID has no `omitempty`, so the (post-import meaningless)
+	//      short id gets re-emitted.
+	// Mutating only the `annotations` key of the raw map preserves
+	// every other field exactly as TW emitted it.
+	rawBytes, err := c.runRaw(ctx, append(c.argv(id), "export"))
+	if err != nil {
+		return fmt.Errorf("export for interval update: %w", err)
+	}
+	rawBytes = bytes.TrimSpace(rawBytes)
+	var records []json.RawMessage
+	if err := json.Unmarshal(rawBytes, &records); err != nil {
+		return fmt.Errorf("decode export for interval update: %w", err)
+	}
+	if len(records) != 1 {
+		return fmt.Errorf("%w: expected 1 task for %q, got %d", ErrInvalid, id, len(records))
+	}
+	var record map[string]json.RawMessage
+	if err := json.Unmarshal(records[0], &record); err != nil {
+		return fmt.Errorf("decode task record: %w", err)
+	}
+
+	var anns []Annotation
+	if rawAnns, ok := record["annotations"]; ok && len(rawAnns) > 0 {
+		if err := json.Unmarshal(rawAnns, &anns); err != nil {
+			return fmt.Errorf("decode annotations: %w", err)
+		}
+	}
+
+	final, err := applyIntervalDiff(anns, edits, creates, deletes)
+	if err != nil {
+		return err
+	}
+	if err := validateFinalIntervals(final, taskActive); err != nil {
+		return err
+	}
+
+	newAnns, err := json.Marshal(final)
+	if err != nil {
+		return fmt.Errorf("marshal annotations: %w", err)
+	}
+	record["annotations"] = newAnns
+
+	out, err := json.Marshal([]map[string]json.RawMessage{record})
+	if err != nil {
+		return fmt.Errorf("marshal task for import: %w", err)
+	}
+	if err := c.Import(ctx, out); err != nil {
+		return fmt.Errorf("import after interval update: %w", err)
+	}
+	return nil
+}
+
+// IntervalOriginKind tags where a planned pair came from. Callers
+// use this to produce error messages that name the originating
+// operation (e.g. "create 0 overlaps with edit 1") rather than just
+// "overlap" - critical for the FE to highlight the exact rows.
+type IntervalOriginKind int
+
+const (
+	// OriginExisting: the pair was already on the task and not
+	// referenced by any edit/delete in the submitted diff.
+	OriginExisting IntervalOriginKind = iota
+	// OriginEdit: the pair came from the new values of an
+	// IntervalEdit; Index is its position in the edits slice.
+	OriginEdit
+	// OriginCreate: the pair came from an IntervalCreate; Index is
+	// its position in the creates slice.
+	OriginCreate
+)
+
+// IntervalOrigin describes a planned pair's provenance.
+type IntervalOrigin struct {
+	Kind  IntervalOriginKind
+	Index int // -1 for Existing; >= 0 for Edit/Create.
+}
+
+// IntervalPlanItem is one pair in the post-diff final state. Used by
+// callers that need to validate or describe the post-diff result
+// before the actual import - in particular the HTTP handler's
+// index-aware overlap detection.
+type IntervalPlanItem struct {
+	Start  time.Time
+	Stop   time.Time // zero -> open
+	Origin IntervalOrigin
+}
+
+// PlanIntervalUpdate computes what the task's interval set will look
+// like after applying the supplied diff to the supplied existing
+// annotations - WITHOUT writing anything. Each returned pair carries
+// an Origin so callers can emit error messages that point back at
+// specific rows in the user's submission.
+//
+// Pairing mirrors ParseSessions (so identity by (StartedAt, StoppedAt)
+// matches what the FE rendered) and so does the diff application -
+// this is the same algorithm applyIntervalDiff uses internally, just
+// stopped one step short of annotation re-emission.
+func PlanIntervalUpdate(existing []Annotation, edits []IntervalEdit, creates []IntervalCreate, deletes []IntervalDelete) []IntervalPlanItem {
+	var startAnns, stopAnns []Annotation
+	for _, a := range existing {
+		if !IsJournalAnnotation(a.Description) {
+			continue
+		}
+		desc := strings.TrimSpace(a.Description)
+		switch {
+		case desc == JournalStartDescription || strings.HasPrefix(desc, JournalStartDescription+" ") || strings.HasPrefix(desc, "Started "):
+			startAnns = append(startAnns, a)
+		case desc == JournalStopDescription || strings.HasPrefix(desc, JournalStopDescription+" ") || strings.HasPrefix(desc, "Stopped "):
+			stopAnns = append(stopAnns, a)
+		}
+	}
+	sort.SliceStable(startAnns, func(i, j int) bool { return startAnns[i].Entry < startAnns[j].Entry })
+	sort.SliceStable(stopAnns, func(i, j int) bool { return stopAnns[i].Entry < stopAnns[j].Entry })
+
+	type pairState struct {
+		startEntry string
+		stopEntry  string
+		deleted    bool
+		edited     bool
+		editIdx    int
+		newStart   time.Time
+		newStop    time.Time
+	}
+	pairs := make([]pairState, 0, len(startAnns))
+	si := 0
+	for _, sa := range startAnns {
+		for si < len(stopAnns) && stopAnns[si].Entry < sa.Entry {
+			si++
+		}
+		if si < len(stopAnns) {
+			pairs = append(pairs, pairState{startEntry: sa.Entry, stopEntry: stopAnns[si].Entry})
+			si++
+		} else {
+			pairs = append(pairs, pairState{startEntry: sa.Entry})
+		}
+	}
+
+	pairIdx := make(map[string][]int)
+	for i, p := range pairs {
+		key := p.startEntry + "|" + p.stopEntry
+		pairIdx[key] = append(pairIdx[key], i)
+	}
+	take := func(key string) (int, bool) {
+		list, ok := pairIdx[key]
+		if !ok || len(list) == 0 {
+			return 0, false
+		}
+		idx := list[0]
+		pairIdx[key] = list[1:]
+		return idx, true
+	}
+	keyFor := func(start, stop time.Time) string {
+		k := FormatTime(start.UTC()) + "|"
+		if !stop.IsZero() {
+			k += FormatTime(stop.UTC())
+		}
+		return k
+	}
+
+	for _, d := range deletes {
+		if idx, ok := take(keyFor(d.OriginalStart, d.OriginalEnd)); ok {
+			pairs[idx].deleted = true
+		}
+	}
+	for i, e := range edits {
+		if idx, ok := take(keyFor(e.OriginalStart, e.OriginalEnd)); ok {
+			pairs[idx].edited = true
+			pairs[idx].editIdx = i
+			pairs[idx].newStart = e.Start.UTC()
+			pairs[idx].newStop = e.Stop.UTC()
+		}
+	}
+
+	out := make([]IntervalPlanItem, 0, len(pairs)+len(creates))
+	for _, p := range pairs {
+		if p.deleted {
+			continue
+		}
+		if p.edited {
+			out = append(out, IntervalPlanItem{
+				Start:  p.newStart,
+				Stop:   p.newStop,
+				Origin: IntervalOrigin{Kind: OriginEdit, Index: p.editIdx},
+			})
+			continue
+		}
+		// Existing untouched pair - parse its on-disk timestamps.
+		// We can't easily fail here; if a malformed entry slipped
+		// through (shouldn't happen since the read side would have
+		// already rejected it), skip it rather than crash.
+		start, err := ParseTime(p.startEntry)
+		if err != nil {
+			continue
+		}
+		var stop time.Time
+		if p.stopEntry != "" {
+			if s, err := ParseTime(p.stopEntry); err == nil {
+				stop = s
+			}
+		}
+		out = append(out, IntervalPlanItem{
+			Start:  start,
+			Stop:   stop,
+			Origin: IntervalOrigin{Kind: OriginExisting, Index: -1},
+		})
+	}
+	for i, cr := range creates {
+		out = append(out, IntervalPlanItem{
+			Start:  cr.Start.UTC(),
+			Stop:   cr.Stop.UTC(),
+			Origin: IntervalOrigin{Kind: OriginCreate, Index: i},
+		})
+	}
+	return out
+}
+
+// applyIntervalDiff produces the new annotation list given the
+// existing annotations and the diff. Non-journal annotations carry
+// through untouched. Journal pairs are reconstructed via the same
+// greedy pairing ParseSessions uses (so identity by (StartedAt,
+// StoppedAt) is well-defined), then deletes/edits are applied by key
+// and creates are appended.
+//
+// Edits and deletes that don't match an existing pair are silently
+// ignored - the pair was already removed by another caller between
+// the FE rendering it and submitting the diff. Erroring would create
+// a footgun where stale tabs can never save.
+//
+// Exposed for testing (the read-side pairing logic is subtle enough
+// that direct unit tests beat round-tripping through UpdateIntervals).
+func applyIntervalDiff(existing []Annotation, edits []IntervalEdit, creates []IntervalCreate, deletes []IntervalDelete) ([]Annotation, error) {
+	var nonJournal []Annotation
+	var startAnns, stopAnns []Annotation
+	for _, a := range existing {
+		if !IsJournalAnnotation(a.Description) {
+			nonJournal = append(nonJournal, a)
+			continue
+		}
+		desc := strings.TrimSpace(a.Description)
+		switch {
+		case desc == JournalStartDescription || strings.HasPrefix(desc, JournalStartDescription+" "):
+			startAnns = append(startAnns, a)
+		case desc == JournalStopDescription || strings.HasPrefix(desc, JournalStopDescription+" "):
+			stopAnns = append(stopAnns, a)
+		case strings.HasPrefix(desc, "Started "):
+			// TW 2.x legacy: timestamp embedded in description.
+			// We never WRITE this form, but we tolerate reading it so
+			// the diff round-trips on historical data. Same heuristic
+			// as ParseSessions / IsJournalAnnotation.
+			startAnns = append(startAnns, a)
+		case strings.HasPrefix(desc, "Stopped "):
+			stopAnns = append(stopAnns, a)
+		}
+	}
+
+	// FormatTime emits YYYYMMDDTHHMMSSZ which is lexically time-
+	// ordered, so a string sort is equivalent to a time sort.
+	sort.SliceStable(startAnns, func(i, j int) bool { return startAnns[i].Entry < startAnns[j].Entry })
+	sort.SliceStable(stopAnns, func(i, j int) bool { return stopAnns[i].Entry < stopAnns[j].Entry })
+
+	type pairState struct {
+		startEntry string // YYYYMMDDTHHMMSSZ
+		stopEntry  string // "" if open
+		deleted    bool
+		edited     bool
+		newStart   time.Time
+		newStop    time.Time // zero -> open
+	}
+	pairs := make([]pairState, 0, len(startAnns))
+	si := 0
+	for _, sa := range startAnns {
+		// Advance past stops at or before this start (orphans). Mirrors
+		// the !stops[si].After(start) check in ParseSessions.
+		for si < len(stopAnns) && stopAnns[si].Entry < sa.Entry {
+			si++
+		}
+		if si < len(stopAnns) {
+			pairs = append(pairs, pairState{startEntry: sa.Entry, stopEntry: stopAnns[si].Entry})
+			si++
+		} else {
+			pairs = append(pairs, pairState{startEntry: sa.Entry})
+		}
+	}
+
+	// Multi-map: when two pairs happen to share an identical (Started,
+	// Stopped) key (rare but possible after a manual data manipulation),
+	// deletes/edits consume them in original order so a second delete
+	// with the same key hits the second pair, not the same one again.
+	pairIdx := make(map[string][]int)
+	for i, p := range pairs {
+		key := p.startEntry + "|" + p.stopEntry
+		pairIdx[key] = append(pairIdx[key], i)
+	}
+	takeIdx := func(key string) (int, bool) {
+		list, ok := pairIdx[key]
+		if !ok || len(list) == 0 {
+			return 0, false
+		}
+		idx := list[0]
+		pairIdx[key] = list[1:]
+		return idx, true
+	}
+	keyFor := func(start, stop time.Time) string {
+		key := FormatTime(start.UTC()) + "|"
+		if !stop.IsZero() {
+			key += FormatTime(stop.UTC())
+		}
+		return key
+	}
+
+	for _, d := range deletes {
+		if idx, ok := takeIdx(keyFor(d.OriginalStart, d.OriginalEnd)); ok {
+			pairs[idx].deleted = true
+		}
+	}
+	for _, e := range edits {
+		if idx, ok := takeIdx(keyFor(e.OriginalStart, e.OriginalEnd)); ok {
+			pairs[idx].edited = true
+			pairs[idx].newStart = e.Start.UTC()
+			pairs[idx].newStop = e.Stop.UTC()
+		}
+	}
+
+	final := make([]Annotation, 0, len(existing)+2*len(creates))
+	final = append(final, nonJournal...)
+	for _, p := range pairs {
+		if p.deleted {
+			continue
+		}
+		startEntry, stopEntry := p.startEntry, p.stopEntry
+		if p.edited {
+			startEntry = FormatTime(p.newStart)
+			stopEntry = ""
+			if !p.newStop.IsZero() {
+				stopEntry = FormatTime(p.newStop)
+			}
+		}
+		final = append(final, Annotation{Entry: startEntry, Description: JournalStartDescription})
+		if stopEntry != "" {
+			final = append(final, Annotation{Entry: stopEntry, Description: JournalStopDescription})
+		}
+	}
+	for _, cr := range creates {
+		final = append(final, Annotation{Entry: FormatTime(cr.Start.UTC()), Description: JournalStartDescription})
+		if !cr.Stop.IsZero() {
+			final = append(final, Annotation{Entry: FormatTime(cr.Stop.UTC()), Description: JournalStopDescription})
+		}
+	}
+
+	sort.SliceStable(final, func(i, j int) bool { return final[i].Entry < final[j].Entry })
+	return final, nil
+}
+
+// validateFinalIntervals enforces cross-state invariants on the
+// resulting annotation list. It pairs the journal annotations exactly
+// like the read side (ParseSessions) does, then checks:
+//   - at most one open interval
+//   - if any interval is open, the task must be active
+//   - no two intervals overlap (chronologically sorted, walk pairs)
+//
+// Overlap detection runs across the FULL final state, which means a
+// new create on page 1 that overlaps with an existing pair on page 3
+// is caught - something the previous full-replace handler couldn't
+// see because it never knew about the page 3 data.
+func validateFinalIntervals(anns []Annotation, taskActive bool) error {
+	var startAnns, stopAnns []Annotation
+	for _, a := range anns {
+		desc := strings.TrimSpace(a.Description)
+		if !IsJournalAnnotation(desc) {
+			continue
+		}
+		switch {
+		case desc == JournalStartDescription || strings.HasPrefix(desc, JournalStartDescription+" ") || strings.HasPrefix(desc, "Started "):
+			startAnns = append(startAnns, a)
+		case desc == JournalStopDescription || strings.HasPrefix(desc, JournalStopDescription+" ") || strings.HasPrefix(desc, "Stopped "):
+			stopAnns = append(stopAnns, a)
+		}
+	}
+	sort.SliceStable(startAnns, func(i, j int) bool { return startAnns[i].Entry < startAnns[j].Entry })
+	sort.SliceStable(stopAnns, func(i, j int) bool { return stopAnns[i].Entry < stopAnns[j].Entry })
+
+	type pair struct {
+		start, stop time.Time
+		open        bool
+	}
+	pairs := make([]pair, 0, len(startAnns))
+	si := 0
+	for _, sa := range startAnns {
+		for si < len(stopAnns) && stopAnns[si].Entry < sa.Entry {
+			si++
+		}
+		start, err := ParseTime(sa.Entry)
+		if err != nil {
+			return fmt.Errorf("validate: bad start entry %q: %w", sa.Entry, err)
+		}
+		if si < len(stopAnns) {
+			stop, err := ParseTime(stopAnns[si].Entry)
+			if err != nil {
+				return fmt.Errorf("validate: bad stop entry %q: %w", stopAnns[si].Entry, err)
+			}
+			pairs = append(pairs, pair{start: start, stop: stop})
+			si++
+		} else {
+			pairs = append(pairs, pair{start: start, open: true})
+		}
+	}
+
+	openCount := 0
+	for _, p := range pairs {
+		if p.open {
+			openCount++
+		}
+	}
+	if openCount > 1 {
+		return ErrMultipleOpenIntervals
+	}
+	if openCount == 1 && !taskActive {
+		return ErrOpenIntervalRequiresActive
+	}
+
+	// Overlap check. Sort pairs by start time so adjacent pairs are
+	// the only ones we need to compare. Treat the (single) open pair
+	// as extending to a sentinel +∞ for the comparison - if a later
+	// closed pair begins after the open one's start, it overlaps with
+	// the still-running interval.
+	sort.SliceStable(pairs, func(i, j int) bool { return pairs[i].start.Before(pairs[j].start) })
+	farFuture := time.Date(9999, 12, 31, 0, 0, 0, 0, time.UTC)
+	for i := 1; i < len(pairs); i++ {
+		prev := pairs[i-1]
+		curr := pairs[i]
+		prevEnd := prev.stop
+		if prev.open {
+			prevEnd = farFuture
+		}
+		if curr.start.Before(prevEnd) {
+			return ErrIntervalOverlap
+		}
+	}
+	return nil
+}
+
+// Import pipes the given JSON byte slice to `task import -` via stdin. This
+// is the ONLY mechanism Taskwarrior exposes for mutating an existing task's
+// annotation entry-timestamps - the argv-based `task annotate` always stamps
+// `now`, so retroactive interval editing has to round-trip via export +
+// re-import.
+//
+// Argv contains a single constant flag (`-` reads stdin); no user input
+// touches argv. Safety:
+//   - The JSON payload is server-constructed from a typed Task struct;
+//     callers should never pass FE-controlled bytes directly.
+//   - guardArgs still inspects our `import` and `-` args (they pass).
+//   - stderr is captured into TaskExitError for parse-error classification.
+//   - Stdin write is bounded by the buffer the caller hands us; nothing
+//     here memory-blows on a giant payload.
+//
+// Returns TaskExitError when `task` exits non-zero (e.g. malformed JSON or
+// schema mismatch). Per `task import` docs the operation is atomic per
+// record on the matching UUID: a parse failure aborts before any record
+// commits.
+func (c *Client) Import(ctx context.Context, raw []byte) error {
+	// Caller args are the constants "import" and "-"; guardArgs runs on
+	// these (pre-argv) so it sees only the un-prefixed slice and never
+	// trips on our own rc.* safety prepends. Same shape Run uses.
+	callerArgs := []string{"import", "-"}
+	if err := guardArgs(callerArgs); err != nil {
+		return err
+	}
+	args := c.argv(callerArgs...)
+
+	timeout := c.timeout
+	if timeout == 0 {
+		timeout = defaultTimeout
+	}
+	ctx, cancel := context.WithTimeout(ctx, timeout)
+	defer cancel()
+
+	bin := c.binary
+	if bin == "" {
+		bin = "task"
+	}
+	cmd := exec.CommandContext(ctx, bin, args...)
+	cmd.Stdin = bytes.NewReader(raw)
+	// Bound stdout/stderr via pipes + LimitReader so a hostile or wedged
+	// `task import` writing gigabytes can't OOM us. Mirrors runRaw's
+	// discipline; the previous `bytes.Buffer` shape would buffer the
+	// entire stream before applying the stderrTailBytes truncation.
+	stdoutR, err := cmd.StdoutPipe()
+	if err != nil {
+		return fmt.Errorf("import stdout pipe: %w", err)
+	}
+	stderrR, err := cmd.StderrPipe()
+	if err != nil {
+		return fmt.Errorf("import stderr pipe: %w", err)
+	}
+	if err := cmd.Start(); err != nil {
+		return fmt.Errorf("start task import: %w", err)
+	}
+	stdoutBytes, _ := io.ReadAll(io.LimitReader(stdoutR, maxOutputBytes))
+	stderrBytes, _ := io.ReadAll(io.LimitReader(stderrR, maxOutputBytes))
+
+	if err := cmd.Wait(); err != nil {
+		stderr := stderrBytes
+		if len(stderr) > stderrTailBytes {
+			stderr = stderr[len(stderr)-stderrTailBytes:]
+		}
+		stdout := stdoutBytes
+		if len(stdout) > stderrTailBytes {
+			stdout = stdout[len(stdout)-stderrTailBytes:]
+		}
+		exitCode := -1
+		var exitErr *exec.ExitError
+		if errors.As(err, &exitErr) {
+			exitCode = exitErr.ExitCode()
+		}
+		return &TaskExitError{
+			ExitCode: exitCode,
+			Stderr:   string(stderr),
+			Stdout:   string(stdout),
+			Wrapped:  err,
+		}
+	}
+	return nil
 }
 
 // ResolveReportFilter returns the filter expression configured for the named

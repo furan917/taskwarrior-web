@@ -36,9 +36,20 @@ templ Layout(p Page) {
 			<meta name="csrf-token" content={ p.CSRFToken }/>
 			<title>{ titleWithContext(p.Title, p.ActiveContext) }</title>
 			<link rel="icon" type="image/svg+xml" href="/static/favicon.svg"/>
+			<!-- flatpickr CSS loads BEFORE app.css so the dark-mode
+			     overrides in app.css (`.dark .flatpickr-...`) win the
+			     cascade. Reversed order would have flatpickr's base
+			     light-theme rules clobber our overrides. -->
+			<link rel="stylesheet" href="/static/vendor/flatpickr/flatpickr.min.css"/>
+			<link rel="stylesheet" href="/static/vendor/flatpickr/confirmDate.css"/>
 			<link rel="stylesheet" href="/static/app.css"/>
 			<script src="/static/theme.js"></script>
 			<script src="/static/htmx.min.js" defer></script>
+			<!-- flatpickr powers the datetime picker on session-row inputs.
+			     Must load before sessions_modal.js (which calls it) - all
+			     `defer` so order-of-tags is execution order. -->
+			<script src="/static/vendor/flatpickr/flatpickr.min.js" defer></script>
+			<script src="/static/vendor/flatpickr/confirmDate.js" defer></script>
 			<!-- App scripts are split per-feature under /static/js/. core_*.js
 			     sets up cross-feature plumbing (CSRF, confirm dialog, modal
 			     lifecycle, refresh, theme); the rest are independent feature
@@ -70,6 +81,13 @@ templ Layout(p Page) {
 			<script src="/static/js/chip_scroll.js" defer></script>
 			<script src="/static/js/mobile_nav.js" defer></script>
 			<script src="/static/js/burndown_tabs.js" defer></script>
+			// form_date_picker.js defines window.tw.flatpickr (shared
+			// picker helpers); sessions_modal.js consumes it inside its
+			// onReady / onPreCalendarPosition hooks. Defer scripts
+			// execute in source order, so form_date_picker.js must
+			// appear first.
+			<script src="/static/js/form_date_picker.js" defer></script>
+			<script src="/static/js/sessions_modal.js" defer></script>
 		</head>
 		<body class="bg-zinc-50 text-zinc-900 antialiased min-h-screen dark:bg-zinc-950 dark:text-zinc-100">
 			<main class="container mx-auto max-w-6xl p-3 sm:p-6">
@@ -89,6 +107,17 @@ templ Layout(p Page) {
 				@keyHint(p)
 			</main>
 			<div id="modal"></div>
+			// sessions-modal-slot is a SEPARATE HTMX swap slot from #modal
+			// so the time-tracking editor can stack on top of (or open
+			// independently of) the main task edit modal. Native <dialog>
+			// top-layer rendering handles the stacking; using a distinct
+			// container keeps the two markup blobs isolated so closing
+			// one doesn't tear down the other.
+			//
+			// Slot id MUST differ from the inner <dialog id="sessions-modal">
+			// or getElementById would return the wrapper div and showModal()
+			// would silently fail on a non-dialog element.
+			<div id="sessions-modal-slot"></div>
 			@confirmDialog()
 			@helpDialog()
 		</body>

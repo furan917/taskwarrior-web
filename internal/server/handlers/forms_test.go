@@ -10,6 +10,7 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/furan917/taskwarrior-web/internal/tw"
 )
@@ -532,5 +533,237 @@ func TestForms_Edit_RendersSuggestDatalists(t *testing.T) {
 		if !strings.Contains(body, want) {
 			t.Errorf("body missing %q", want)
 		}
+	}
+}
+
+// sessionsFixtureJSON returns a fake-task export shape with two paired
+// journal annotations forming one session on the local-zone day of
+// localStart. The middle-of-day UTC times keep the session inside the
+// same calendar day across any plausible test-runner TZ (see localDay
+// in views/sessions_modal_test.go for the same reasoning).
+func sessionsFixtureJSON(uuid string, localStart time.Time) string {
+	startUTC := localStart.UTC()
+	stopUTC := startUTC.Add(time.Hour)
+	return `[{
+		"id": 1,
+		"uuid": "` + uuid + `",
+		"description": "fixture",
+		"status": "pending",
+		"entry": "20260101T000000Z",
+		"annotations": [
+			{"entry": "` + tw.FormatTime(startUTC) + `", "description": "Started task"},
+			{"entry": "` + tw.FormatTime(stopUTC) + `", "description": "Stopped task"}
+		]
+	}]`
+}
+
+const sessionsFixtureUUID = "11111111-2222-3333-4444-555555555555"
+
+// sessionsLocalDay constructs noon-local on the given calendar day -
+// matches the convention in views/sessions_modal_test.go and gives the
+// handler tests stable per-TZ behaviour.
+func sessionsLocalDay(year int, month time.Month, day int) time.Time {
+	return time.Date(year, month, day, 12, 0, 0, 0, time.Local)
+}
+
+// TestForms_Sessions_RejectsBadID confirms the path-value gate matches
+// the rest of the form handlers: anything that fails tw.IDPattern bails
+// at 400 before reaching `task export`.
+func TestForms_Sessions_RejectsBadID(t *testing.T) {
+	f := newForms()
+	for _, id := range []string{"abc!", "../etc", "1;ls", "1 2", ""} {
+		req := httptest.NewRequest(http.MethodGet, "/forms/sessions/x", nil)
+		req.SetPathValue("id", id)
+		rr := httptest.NewRecorder()
+		f.Sessions(rr, req)
+		if rr.Code != http.StatusBadRequest {
+			t.Errorf("id %q: got %d want 400; body=%s", id, rr.Code, rr.Body.String())
+		}
+	}
+}
+
+// TestForms_Sessions_NotFoundForUnknownID: an empty export (Taskwarrior
+// returns "[]" when the filter matches nothing) becomes a 404 rather
+// than a 200 with an empty modal - the modal needs a real task to be
+// meaningful.
+func TestForms_Sessions_NotFoundForUnknownID(t *testing.T) {
+	installFakeTask(t, "[]")
+	f := newForms()
+	req := httptest.NewRequest(http.MethodGet, "/forms/sessions/42", nil)
+	req.SetPathValue("id", "42")
+	rr := httptest.NewRecorder()
+	f.Sessions(rr, req)
+	if rr.Code != http.StatusNotFound {
+		t.Errorf("status: got %d want 404", rr.Code)
+	}
+}
+
+// TestForms_Sessions_RendersDialog covers the happy path:
+//   - 200 with HX-Trigger: showSessions
+//   - response is the full dialog (contains <dialog id="sessions-modal")
+//   - hidden _csrf input carries the context token (FE-H2 fix)
+//   - rendered session row reflects the fixture's annotation pair
+func TestForms_Sessions_RendersDialog(t *testing.T) {
+	installFakeTask(t, sessionsFixtureJSON(sessionsFixtureUUID, sessionsLocalDay(2026, 5, 12)))
+	f := newForms()
+	req := httptest.NewRequest(http.MethodGet, "/forms/sessions/"+sessionsFixtureUUID, nil)
+	req.SetPathValue("id", sessionsFixtureUUID)
+	req = req.WithContext(WithCSRFToken(context.Background(), "sess-tok"))
+	rr := httptest.NewRecorder()
+	f.Sessions(rr, req)
+
+	if rr.Code != http.StatusOK {
+		t.Fatalf("status: got %d want 200; body=%s", rr.Code, rr.Body.String())
+	}
+	if rr.Header().Get("HX-Trigger") != "showSessions" {
+		t.Errorf("HX-Trigger: got %q want showSessions", rr.Header().Get("HX-Trigger"))
+	}
+	body := rr.Body.String()
+	for _, want := range []string{
+		`id="sessions-modal"`, // dialog id (FE-M1 modalShell parametrise)
+		`data-sessions-form`,  // form hook
+		`name="_csrf"`,        // hidden CSRF input (FE-H2)
+		`value="sess-tok"`,    // CSRF carries context value
+		`data-session-row`,    // a row rendered for the fixture session
+	} {
+		if !strings.Contains(body, want) {
+			t.Errorf("body missing %q", want)
+		}
+	}
+}
+
+// TestForms_Sessions_DayFilterScopes confirms that ?day=YYYY-MM-DD
+// triggers the day-filter UI bar (sessionsDayFilterBar) and the result
+// is scoped to that day. Uses the fixture's known local-zone day so
+// the test is TZ-stable.
+func TestForms_Sessions_DayFilterScopes(t *testing.T) {
+	day := sessionsLocalDay(2026, 5, 12)
+	installFakeTask(t, sessionsFixtureJSON(sessionsFixtureUUID, day))
+	f := newForms()
+	req := httptest.NewRequest(http.MethodGet, "/forms/sessions/"+sessionsFixtureUUID+"?day="+day.Format("2006-01-02"), nil)
+	req.SetPathValue("id", sessionsFixtureUUID)
+	rr := httptest.NewRecorder()
+	f.Sessions(rr, req)
+
+	if rr.Code != http.StatusOK {
+		t.Fatalf("status: got %d want 200; body=%s", rr.Code, rr.Body.String())
+	}
+	body := rr.Body.String()
+	// The day-filter bar's "Show all" toggle and the day label both
+	// only render when DayFilter is set (sessionsDayFilterBar branch).
+	if !strings.Contains(body, "Show all") {
+		t.Errorf("expected 'Show all' affordance in day-filtered view")
+	}
+	if !strings.Contains(body, day.Format("2006-01-02")) {
+		t.Errorf("expected day-label %q in body", day.Format("2006-01-02"))
+	}
+}
+
+// TestForms_Sessions_MalformedDayFallsBack: a bad ?day= value must NOT
+// 400 - it's a stale-bookmark scenario, and we'd rather render the
+// full list than dead-end the user. Handler strips the bad day and
+// proceeds; output should NOT include the day-filter bar.
+func TestForms_Sessions_MalformedDayFallsBack(t *testing.T) {
+	installFakeTask(t, sessionsFixtureJSON(sessionsFixtureUUID, sessionsLocalDay(2026, 5, 12)))
+	f := newForms()
+	req := httptest.NewRequest(http.MethodGet, "/forms/sessions/"+sessionsFixtureUUID+"?day=not-a-date", nil)
+	req.SetPathValue("id", sessionsFixtureUUID)
+	rr := httptest.NewRecorder()
+	f.Sessions(rr, req)
+
+	if rr.Code != http.StatusOK {
+		t.Fatalf("status: got %d want 200; body=%s", rr.Code, rr.Body.String())
+	}
+	body := rr.Body.String()
+	if strings.Contains(body, "Show all") {
+		t.Errorf("malformed day should fall back to full list; 'Show all' bar present")
+	}
+}
+
+// TestForms_Sessions_FragmentReturnsListOnly confirms the ?fragment=1
+// branch (used by the "Earlier days" load-more button): response
+// contains the session list markup but NOT the dialog chrome, and
+// carries Cache-Control: no-store so chained fragment fetches always
+// see the live data.
+func TestForms_Sessions_FragmentReturnsListOnly(t *testing.T) {
+	installFakeTask(t, sessionsFixtureJSON(sessionsFixtureUUID, sessionsLocalDay(2026, 5, 12)))
+	f := newForms()
+	req := httptest.NewRequest(http.MethodGet, "/forms/sessions/"+sessionsFixtureUUID+"?fragment=1", nil)
+	req.SetPathValue("id", sessionsFixtureUUID)
+	rr := httptest.NewRecorder()
+	f.Sessions(rr, req)
+
+	if rr.Code != http.StatusOK {
+		t.Fatalf("status: got %d want 200; body=%s", rr.Code, rr.Body.String())
+	}
+	if rr.Header().Get("Cache-Control") != "no-store" {
+		t.Errorf("Cache-Control: got %q want no-store", rr.Header().Get("Cache-Control"))
+	}
+	body := rr.Body.String()
+	if strings.Contains(body, `id="sessions-modal"`) {
+		t.Errorf("fragment must NOT include dialog chrome; body=%s", body)
+	}
+	if !strings.Contains(body, "data-session-row") {
+		t.Errorf("fragment must include session rows; body=%s", body)
+	}
+}
+
+// TestForms_Sessions_FragmentLastPageRendersEndFooter confirms the
+// end-of-history affordance (FE-L5): when the fragment endpoint
+// returns the LAST page (HasMore=false), it renders the "No more
+// sessions" footer in place of the (absent) load-more button so the
+// user understands they've reached the bottom.
+func TestForms_Sessions_FragmentLastPageRendersEndFooter(t *testing.T) {
+	installFakeTask(t, sessionsFixtureJSON(sessionsFixtureUUID, sessionsLocalDay(2026, 5, 12)))
+	f := newForms()
+	// Offset past the only group forces HasMore=false in the fragment.
+	req := httptest.NewRequest(http.MethodGet, "/forms/sessions/"+sessionsFixtureUUID+"?fragment=1&offset=99", nil)
+	req.SetPathValue("id", sessionsFixtureUUID)
+	rr := httptest.NewRecorder()
+	f.Sessions(rr, req)
+
+	if rr.Code != http.StatusOK {
+		t.Fatalf("status: got %d want 200; body=%s", rr.Code, rr.Body.String())
+	}
+	if !strings.Contains(rr.Body.String(), "No more sessions") {
+		t.Errorf("expected end-of-history footer; body=%s", rr.Body.String())
+	}
+}
+
+// TestForms_Sessions_FromTimesheetRendersChevron: ?from=timesheet flips
+// the header to include the back-chevron "Edit task" affordance, so
+// the user can pivot to the full edit modal without retracing through
+// /timesheet. Detected by the aria-label since the icon itself is an
+// inline SVG.
+func TestForms_Sessions_FromTimesheetRendersChevron(t *testing.T) {
+	installFakeTask(t, sessionsFixtureJSON(sessionsFixtureUUID, sessionsLocalDay(2026, 5, 12)))
+	f := newForms()
+	req := httptest.NewRequest(http.MethodGet, "/forms/sessions/"+sessionsFixtureUUID+"?from=timesheet", nil)
+	req.SetPathValue("id", sessionsFixtureUUID)
+	rr := httptest.NewRecorder()
+	f.Sessions(rr, req)
+
+	if rr.Code != http.StatusOK {
+		t.Fatalf("status: got %d want 200; body=%s", rr.Code, rr.Body.String())
+	}
+	body := rr.Body.String()
+	if !strings.Contains(body, `aria-label="Open task editor"`) {
+		t.Errorf("expected timesheet-entry chevron; body=%s", body)
+	}
+}
+
+// TestForms_Sessions_OffsetClampedSilently: a hand-crafted ?offset=
+// far beyond any sane number shouldn't 400 or panic. The handler
+// clamps to [0, 10000] and BuildSessionsPage tolerates offsets past
+// the data end, so the response is a successful empty render.
+func TestForms_Sessions_OffsetClampedSilently(t *testing.T) {
+	installFakeTask(t, sessionsFixtureJSON(sessionsFixtureUUID, sessionsLocalDay(2026, 5, 12)))
+	f := newForms()
+	req := httptest.NewRequest(http.MethodGet, "/forms/sessions/"+sessionsFixtureUUID+"?offset=999999999", nil)
+	req.SetPathValue("id", sessionsFixtureUUID)
+	rr := httptest.NewRecorder()
+	f.Sessions(rr, req)
+	if rr.Code != http.StatusOK {
+		t.Fatalf("status: got %d want 200; body=%s", rr.Code, rr.Body.String())
 	}
 }
