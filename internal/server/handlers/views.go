@@ -598,12 +598,10 @@ func (v *Views) Done(w http.ResponseWriter, r *http.Request) {
 	renderHTML(w, r, "Done", views.DonePage(page, tasks, days), v.Logger)
 }
 
-// Stats renders the dashboard at /stats: count cards (pending / waiting /
-// overdue / active / blocked / recurring + completed-7d / -30d) and a
-// completion-history bar chart for the last `statsHistoryDays` days. Two
-// Export calls back the page - one for open tasks, one for completed in
-// the chart window. Everything else is computed in Go from those slices
-// to keep wall time low.
+// Stats renders the dashboard at /stats: count cards, completion history,
+// burndown charts, monthly history table, and net fix rate. Five Export calls
+// back the page (open, completed-14d, completed-365d, recurring, deleted);
+// everything else is computed in Go from those slices to keep wall time low.
 const statsHistoryDays = 14
 
 func (v *Views) Stats(w http.ResponseWriter, r *http.Request) {
@@ -638,12 +636,23 @@ func (v *Views) Stats(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "task export failed", http.StatusInternalServerError)
 		return
 	}
+	// Deleted tasks must be included in the peak-scan for fix-rate calculation:
+	// Taskwarrior's CmdBurndown::scanForPeak processes ALL tasks (including
+	// deleted) to find the highest simultaneous open count. Without them the
+	// peak is too low and the rate is understated.
+	deleted, err := v.exportWithContext(r, "status:deleted")
+	if err != nil {
+		v.Logger.Error("stats: deleted fetch failed", "err", err)
+		http.Error(w, "task export failed", http.StatusInternalServerError)
+		return
+	}
 	stats := computeStats(open, completed, statsHistoryDays)
 	stats.Recurring = len(recurring)
 	now := time.Now()
 	stats.MonthlyHistory = computeMonthlyHistory(open, allCompleted)
 	stats.BurndownDaily = computeBurndown(open, allCompleted, true, 30, now)
 	stats.BurndownWeekly = computeBurndown(open, allCompleted, false, 13, now)
+	stats.NetFixRate, stats.EstimatedCompletion = computeBurndownRates(open, allCompleted, deleted, recurring, now)
 	page := v.buildPage(r, "Stats", "stats", false)
 	renderHTML(w, r, "Stats", views.StatsPage(page, stats), v.Logger)
 }
@@ -802,6 +811,112 @@ func computeBurndown(open, allCompleted []tw.Task, daily bool, bars int, now tim
 		result[i] = views.BurndownBar{Label: label, Date: date, Pending: pending, Started: started, Done: done}
 	}
 	return result
+}
+
+// computeBurndownRates matches Taskwarrior's CmdBurndown::scanForPeak algorithm
+// exactly: for every task, count it as "pending" on each calendar day from its
+// entry date until its end date (or today if still open). Deleted and recurring
+// tasks are included — Taskwarrior's scanForPeak processes ALL tasks (filter.subset
+// without a status filter returns everything). The peak is the earliest day with
+// the maximum count, matching std::map's ascending-key iteration.
+// Returns (0, "") when there is no convergence.
+func computeBurndownRates(open, allCompleted, deleted, recurring []tw.Task, now time.Time) (float64, string) {
+	dailyCounts := map[string]int{}
+	currentCount := 0
+
+	today := time.Date(now.Year(), now.Month(), now.Day(), 0, 0, 0, 0, now.Location())
+	addOpen := func(entry time.Time) {
+		currentCount++
+		startDay := time.Date(entry.Year(), entry.Month(), entry.Day(), 0, 0, 0, 0, entry.Location())
+		for d := startDay; !d.After(today); d = d.AddDate(0, 0, 1) {
+			dailyCounts[d.Format("2006-01-02")]++
+		}
+	}
+	addClosed := func(entry, end time.Time) {
+		startDay := time.Date(entry.Year(), entry.Month(), entry.Day(), 0, 0, 0, 0, entry.Location())
+		// Taskwarrior's loop: while (entry_incremented < end_exact_time)
+		// Using midnight of each day as entry_incremented approximates this —
+		// a task completed at 15:00 on day D has midnight(D) < 15:00 so D is counted.
+		for d := startDay; d.Before(end); d = d.AddDate(0, 0, 1) {
+			dailyCounts[d.Format("2006-01-02")]++
+		}
+	}
+
+	for _, slc := range [][]tw.Task{open, recurring} {
+		for _, t := range slc {
+			entry, err := tw.ParseTime(t.Entry)
+			if err != nil || entry.IsZero() {
+				continue
+			}
+			addOpen(entry)
+		}
+	}
+	for _, slc := range [][]tw.Task{allCompleted, deleted} {
+		for _, t := range slc {
+			entry, err := tw.ParseTime(t.Entry)
+			if err != nil || entry.IsZero() {
+				continue
+			}
+			end, err := tw.ParseTime(t.CompletedAt())
+			if err != nil || end.IsZero() {
+				continue
+			}
+			addClosed(entry, end)
+		}
+	}
+
+	if currentCount == 0 {
+		return 0, ""
+	}
+
+	// Taskwarrior's std::map iterates in ascending key order; the first date
+	// to reach the maximum count becomes the peak (earliest tied date wins).
+	var peakCount int
+	var peakDate string
+	dates := make([]string, 0, len(dailyCounts))
+	for d := range dailyCounts {
+		dates = append(dates, d)
+	}
+	sort.Strings(dates)
+	for _, date := range dates {
+		if dailyCounts[date] > peakCount {
+			peakCount = dailyCounts[date]
+			peakDate = date
+		}
+	}
+
+	if peakCount <= currentCount {
+		return 0, ""
+	}
+	peak, err := time.ParseInLocation("2006-01-02", peakDate, now.Location())
+	if err != nil {
+		return 0, ""
+	}
+	secondsSincePeak := now.Sub(peak).Seconds()
+	if secondsSincePeak < 3*86400 {
+		return 0, ""
+	}
+
+	// Match Taskwarrior exactly: work in tasks/second then convert for display.
+	fixRatePerSec := float64(peakCount-currentCount) / secondsSincePeak
+	fixRatePerDay := fixRatePerSec * 86400
+	secondsRemaining := float64(currentCount) / fixRatePerSec
+	daysRemaining := secondsRemaining / 86400
+	completion := now.Add(time.Duration(secondsRemaining) * time.Second)
+
+	var vague string
+	switch {
+	case daysRemaining >= 365:
+		vague = fmt.Sprintf("%.0fy", daysRemaining/365)
+	case daysRemaining >= 30:
+		vague = fmt.Sprintf("%.0fmo", daysRemaining/30)
+	case daysRemaining >= 7:
+		vague = fmt.Sprintf("%.0fw", daysRemaining/7)
+	default:
+		vague = fmt.Sprintf("%.0fd", daysRemaining)
+	}
+
+	return fixRatePerDay, completion.Format("2006-01-02") + " (" + vague + ")"
 }
 
 // computeMonthlyHistory builds a newest-first slice of MonthCount covering up
