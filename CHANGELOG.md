@@ -1,5 +1,15 @@
 # Changelog
 
+## [1.3.1](https://github.com/furan917/taskwarrior-web-portal/compare/v1.3.0...v1.3.1) (2026-05-13)
+
+
+### Bug Fixes
+
+* correct burndown chart calculations ([1fa6c41](https://github.com/furan917/taskwarrior-web-portal/commit/1fa6c41b29c145f9fc65590846bd374ba48ef8fb))
+* rename to avoid conflicting with tmahmood's repo ([60ae271](https://github.com/furan917/taskwarrior-web-portal/commit/60ae2717173b36d1fe8baff07dddfc0f278722e7))
+* Stopped deleted tasks blocking + updated urgency bars cutoff ([99c40f8](https://github.com/furan917/taskwarrior-web-portal/commit/99c40f846424ac9c04507dc2dbf56c94749ad672))
+* update tests for last fix ([307ffe1](https://github.com/furan917/taskwarrior-web-portal/commit/307ffe13205c8bfd7c1902906b4580f5e5523aef))
+
 ## [1.3.0](https://github.com/furan917/taskwarrior-web-portal/compare/v1.2.3...v1.3.0) (2026-05-13)
 
 
