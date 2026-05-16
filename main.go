@@ -9,6 +9,7 @@ import (
 	"io/fs"
 	"log/slog"
 	"os"
+	"os/exec"
 	"os/signal"
 	"path/filepath"
 	"runtime"
@@ -43,19 +44,15 @@ func staticFS() fs.FS {
 	return sub
 }
 
-// checkDataDir refuses to start if ~/.task is group/other-readable. Tasks
-// contain sensitive material (offboarding, hiring, board); a permissive mode
+// checkDataDir refuses to start if the Taskwarrior data directory is
+// group/other-readable. Tasks contain sensitive material; a permissive mode
 // would leak content to other local users.
 func checkDataDir(logger *slog.Logger) error {
-	home, err := os.UserHomeDir()
-	if err != nil {
-		return fmt.Errorf("home dir: %w", err)
-	}
-	dataDir := filepath.Join(home, ".task")
+	dataDir := resolveDataDir()
 	info, err := os.Stat(dataDir)
 	if err != nil {
 		if os.IsNotExist(err) {
-			logger.Warn("~/.task does not exist; the binary still runs but every Export will fail", "path", dataDir)
+			logger.Warn("task data dir does not exist; the binary still runs but task commands will fail", "path", dataDir)
 			return nil
 		}
 		return err
@@ -66,6 +63,30 @@ func checkDataDir(logger *slog.Logger) error {
 	}
 	logger.Info("data dir ok", "path", dataDir, "mode", fmt.Sprintf("%o", mode))
 	return nil
+}
+
+// resolveDataDir returns the effective Taskwarrior data directory. It asks
+// `task _get rc.data.location` first so that TASKRC overrides (e.g. in Docker
+// where data lives at /config/task rather than ~/.task) are respected.
+// Falls back to ~/.task if task is not on PATH or the call fails.
+func resolveDataDir() string {
+	out, err := exec.Command("task", "_get", "rc.data.location").Output()
+	if err == nil {
+		if dir := strings.TrimSpace(string(out)); dir != "" {
+			if strings.HasPrefix(dir, "~/") {
+				home, herr := os.UserHomeDir()
+				if herr == nil {
+					return filepath.Join(home, dir[2:])
+				}
+			}
+			return dir
+		}
+	}
+	home, err := os.UserHomeDir()
+	if err != nil {
+		return ".task"
+	}
+	return filepath.Join(home, ".task")
 }
 
 // logDirFor is the testable core of log-dir resolution: takes an explicit
