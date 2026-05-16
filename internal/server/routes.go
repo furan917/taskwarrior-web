@@ -67,6 +67,7 @@ func registerRoutes(mux *http.ServeMux, cfg Config) {
 	app.HandleFunc("POST /tasks/{id}/denotate", t.Denotate)
 	app.HandleFunc("GET /done", v.Done)
 	app.HandleFunc("GET /stats", v.Stats)
+	app.HandleFunc("GET /config", v.ConfigInfo)
 	app.HandleFunc("GET /timesheet", v.Timesheet)
 	app.HandleFunc("POST /timesheet/enable-tracking", v.EnableTimeTracking)
 	app.HandleFunc("POST /undo", t.Undo)

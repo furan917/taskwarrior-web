@@ -10,11 +10,7 @@ import (
 	"github.com/furan917/taskwarrior-web-portal/internal/config"
 )
 
-// allowedHosts is the closed set of Host header values this server accepts.
-// Anything else is rejected with 421 - defends against DNS rebinding (a
-// page on evil.com causing the browser to resolve evil.com -> 127.0.0.1
-// and POST). Derived from config.Addr at init so the bind port and the
-// allowlist can never drift.
+// allowedHosts is built from config.AllowedHosts() at init. Extended by TWP_ALLOWED_HOSTS.
 var allowedHosts = func() map[string]bool {
 	out := map[string]bool{
 		// Some clients omit the port for default-port URLs; safe to allow
@@ -28,9 +24,7 @@ var allowedHosts = func() map[string]bool {
 	return out
 }()
 
-// allowedOrigins protects state-changing requests against cross-origin
-// POSTs even if a malicious page somehow got through Host validation.
-// Derived from config.Addr at init.
+// allowedOrigins mirrors allowedHosts with http:// prefix. Extended by TWP_ALLOWED_HOSTS.
 var allowedOrigins = func() map[string]bool {
 	out := map[string]bool{}
 	for _, o := range config.AllowedOrigins() {

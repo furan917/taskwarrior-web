@@ -21,7 +21,48 @@ PLIST_LABEL="local.taskwarrior-web-portal" # macOS-only: launchd label keeps the
 REPO_ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 BIN_SRC="${REPO_ROOT}/bin/taskwarrior-web-portal"
 BIN_DST="$HOME/.local/bin/taskwarrior-web-portal"
-URL="http://127.0.0.1:5050"
+
+# --- TWP_* env var reading ---------------------------------------------------
+# These vars are read from the caller's environment at install time and baked
+# into the service unit / plist so the running binary sees the same values even
+# though systemd --user and launchd don't inherit the shell's rc-file env.
+#
+# Usage examples:
+#   TWP_BIND_HOST=0.0.0.0 make install
+#   TWP_BIND_PORT=8080 TWP_ALLOWED_HOSTS=myhostname make install
+#
+# Unset or empty vars are not baked in; the binary's own defaults apply.
+
+TWP_BIND_HOST="${TWP_BIND_HOST:-}"
+TWP_BIND_PORT="${TWP_BIND_PORT:-}"
+TWP_ALLOWED_HOSTS="${TWP_ALLOWED_HOSTS:-}"
+
+# Validate port if set.
+if [[ -n "$TWP_BIND_PORT" ]]; then
+    if ! [[ "$TWP_BIND_PORT" =~ ^[0-9]+$ ]] || (( TWP_BIND_PORT < 1 || TWP_BIND_PORT > 65535 )); then
+        echo "error: TWP_BIND_PORT=$TWP_BIND_PORT is not a valid port (1-65535)" >&2
+        exit 1
+    fi
+fi
+
+# Derive the URL for the smoke test and shell alias. We always connect via
+# loopback; TWP_BIND_HOST affects which interface the server listens on.
+_port="${TWP_BIND_PORT:-5050}"
+URL="http://127.0.0.1:${_port}"
+
+# Build the list of TWP_* vars to bake in (only those that are non-empty).
+TWP_VARS=()
+[[ -n "$TWP_BIND_HOST"    ]] && TWP_VARS+=("TWP_BIND_HOST=${TWP_BIND_HOST}")
+[[ -n "$TWP_BIND_PORT"    ]] && TWP_VARS+=("TWP_BIND_PORT=${TWP_BIND_PORT}")
+[[ -n "$TWP_ALLOWED_HOSTS" ]] && TWP_VARS+=("TWP_ALLOWED_HOSTS=${TWP_ALLOWED_HOSTS}")
+
+# Print which vars will be baked so the user can see what's happening.
+if [[ ${#TWP_VARS[@]} -gt 0 ]]; then
+    echo "env vars: baking into service config:"
+    for _v in "${TWP_VARS[@]}"; do echo "            $_v"; done
+else
+    echo "env vars: none set (using binary defaults)"
+fi
 
 # OS detection. We use the result both for the `tw` shell alias (open vs
 # xdg-open) and to pick the service-install code path.
@@ -73,10 +114,37 @@ install_darwin() {
     # tempfile lives IN the destination directory (not $TMPDIR) so the mv is
     # always a same-filesystem rename, never a copy+unlink that could expose
     # a partial file to launchd's parser between the writes.
+    #
+    # __TWP_ENV__ is replaced by zero or more plist <key>/<string> pairs
+    # (one pair per baked TWP_* var). awk is used for portable multi-line
+    # replacement.
     mkdir -p "$(dirname "$plist_dst")"
     local tmp_plist
     tmp_plist="$(mktemp "$(dirname "$plist_dst")/${PLIST_LABEL}.XXXXXX.plist")"
-    sed -e "s|__BIN__|$BIN_DST|g" -e "s|__LOG_DIR__|$log_dir|g" "$plist_tmpl" > "$tmp_plist"
+
+    # Build the replacement block for __TWP_ENV__: plist key/string pairs.
+    local twp_env_block=""
+    for _v in "${TWP_VARS[@]}"; do
+        local _key="${_v%%=*}"
+        local _val="${_v#*=}"
+        twp_env_block="${twp_env_block}        <key>${_key}</key>"$'\n'
+        twp_env_block="${twp_env_block}        <string>${_val}</string>"$'\n'
+    done
+    local tmp_env_block
+    tmp_env_block="$(mktemp)"
+    printf '%s' "$twp_env_block" > "$tmp_env_block"
+
+    sed -e "s|__BIN__|$BIN_DST|g" -e "s|__LOG_DIR__|$log_dir|g" "$plist_tmpl" \
+        | awk -v envfile="$tmp_env_block" '
+            /^[[:space:]]*__TWP_ENV__[[:space:]]*$/ {
+                while ((getline line < envfile) > 0) print line
+                close(envfile)
+                next
+            }
+            { print }
+        ' > "$tmp_plist"
+    rm -f "$tmp_env_block"
+
     mv "$tmp_plist" "$plist_dst"
     chmod 644 "$plist_dst"
     echo "plist   : $plist_dst"
@@ -134,10 +202,34 @@ EOF
     # lives in the destination directory so the mv is always a same-fs
     # rename, never a copy+unlink that could expose a partial unit to
     # `systemctl daemon-reload` between writes.
+    #
+    # __TWP_ENV__ is replaced by zero or more `Environment=KEY=VALUE` lines
+    # (one per baked TWP_* var). awk is used instead of sed because sed can't
+    # portably replace a single placeholder with multiple lines.
     mkdir -p "$(dirname "$unit_dst")"
     local tmp_unit
     tmp_unit="$(mktemp "$(dirname "$unit_dst")/${LABEL}.XXXXXX.service")"
-    sed -e "s|__BIN__|$BIN_DST|g" -e "s|__XDG_STATE_HOME__|$xdg_state_home|g" "$unit_tmpl" > "$tmp_unit"
+
+    # Build the replacement block for __TWP_ENV__: one Environment= line per var.
+    local twp_env_block=""
+    for _v in "${TWP_VARS[@]}"; do
+        twp_env_block="${twp_env_block}Environment=${_v}"$'\n'
+    done
+    local tmp_env_block
+    tmp_env_block="$(mktemp)"
+    printf '%s' "$twp_env_block" > "$tmp_env_block"
+
+    sed -e "s|__BIN__|$BIN_DST|g" -e "s|__XDG_STATE_HOME__|$xdg_state_home|g" "$unit_tmpl" \
+        | awk -v envfile="$tmp_env_block" '
+            /^__TWP_ENV__$/ {
+                while ((getline line < envfile) > 0) print line
+                close(envfile)
+                next
+            }
+            { print }
+        ' > "$tmp_unit"
+    rm -f "$tmp_env_block"
+
     mv "$tmp_unit" "$unit_dst"
     chmod 644 "$unit_dst"
     echo "unit    : $unit_dst"

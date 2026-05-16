@@ -41,6 +41,22 @@ make run                               # alias for the above
 open http://127.0.0.1:5050             # in browser
 ```
 
+## Configuration
+
+All settings are optional environment variables. Defaults work for a standard desktop install.
+
+| Variable | Default | Description |
+|---|---|---|
+| `TWP_BIND_HOST` | `127.0.0.1` | Address to listen on. Set to `0.0.0.0` for container or LAN access. |
+| `TWP_BIND_PORT` | `5050` | Port to listen on. |
+| `TWP_ALLOWED_HOSTS` | _(none)_ | Comma-separated bare hostnames or IPs that are allowed to reach the portal (e.g. `192.168.1.10,myhostname`). The port is appended automatically from `TWP_BIND_PORT` — do not include it here. |
+
+`TWP_BIND_HOST` and `TWP_BIND_PORT` are the only knobs for the service itself. `TWP_ALLOWED_HOSTS` is only needed when you access the portal from a different machine or hostname — the defaults (`localhost` and `127.0.0.1`) cover a standard single-machine install.
+
+### /config page
+
+The gear icon in the top-right of the header opens a read-only configuration page showing your effective Taskwarrior and portal settings: version, data directory, sync server URL and client ID, date format, time-tracking status, hooks, UDAs, active context, and the portal's effective bind address and allowed hosts. Sensitive values (encryption secrets) are never shown.
+
 ## Install as a user service (auto-start at login)
 
 ```sh
@@ -134,7 +150,7 @@ A handful of smoke tests in `internal/tw/client_test.go` shell out to the real `
 
 ## Security notes
 
-- **Bind**: explicit `tcp4` to `127.0.0.1:5050`. Other machines on the LAN cannot reach it. Allowed-host and origin maps are derived from `internal/config.Addr` so the bind port can never drift between three places.
+- **Bind**: explicit `tcp4` to the configured address (default `127.0.0.1:5050`). Controlled by `TWP_BIND_HOST` and `TWP_BIND_PORT`. The allowed-host and origin allowlists are derived from the same `bindPort()` call so the port can never drift between the listener and the middleware. `TWP_ALLOWED_HOSTS` accepts bare hostnames only — the port is appended automatically, so `myhostname:5050` and `myhostname:9000` cannot co-exist if only one port is configured.
 - **CSRF**: double-submit cookie + `X-CSRF-Token` header (auto-injected by `web/static/js/core_csrf.js` on every HTMX request from the page). `SameSite=Strict`, HttpOnly, 32 random bytes.
 - **Command injection**: `tw.AddInput.AddArgs()` always wraps user-supplied description in `description:"<text>"` form. Tokens like `+urgent due:tomorrow rc.data.location=/tmp/x` are stored as literal text, not interpreted as DOM modifiers. `tw.guardArgs` rejects any caller-supplied `rc.*` arg as defence-in-depth.
 - **Hostile taskrc**: a context's read filter is composed into argv as `(filter)` for export, which would otherwise let `rc.*` tokens slip past `guardArgs`. `tw.Context.SafeReadFilter()` scans for `rc.*` tokens at point of use and returns empty (no context clause) if any are present.

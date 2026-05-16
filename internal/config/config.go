@@ -12,16 +12,39 @@
 package config
 
 import (
+	"fmt"
+	"os"
+	"strconv"
 	"strings"
 	"time"
 )
 
-// Addr is the explicit IPv4 loopback bind. Port 5050 is the default because
-// 5000 is taken by macOS AirPlay Receiver and 8080/8081 are commonly used by
-// other dev tools (Docker Desktop, generic local servers). tcp4 (vs tcp) is
-// enforced at server start so dual-stack systems don't accidentally also
-// listen on [::1].
-const Addr = "127.0.0.1:5050"
+const (
+	defaultHost = "127.0.0.1"
+	defaultPort = "5050"
+)
+
+// Addr composes the bind address from TWP_BIND_HOST and TWP_BIND_PORT.
+// Defaults to 127.0.0.1:5050 for desktop installs (local-only by design).
+// Container deployments set TWP_BIND_HOST=0.0.0.0; Unraid users control
+// the external port via Docker's port-mapping and TWP_BIND_PORT.
+func Addr() string {
+	return bindHost() + ":" + bindPort()
+}
+
+func bindHost() string {
+	if v := os.Getenv("TWP_BIND_HOST"); v != "" {
+		return v
+	}
+	return defaultHost
+}
+
+func bindPort() string {
+	if v := os.Getenv("TWP_BIND_PORT"); v != "" {
+		return v
+	}
+	return defaultPort
+}
 
 // HTTP server-level timeouts. Read/Write/Idle bound the per-connection
 // liveness; Shutdown caps how long the binary will wait for in-flight
@@ -54,15 +77,24 @@ const (
 )
 
 // AllowedHosts returns the closed set of Host header values the server
-// accepts. Derived from Addr so a port change here doesn't have to be
-// mirrored in three places. Set form returned for direct map[string]bool
-// construction by the middleware.
+// accepts. Always includes localhost and 127.0.0.1 on the configured port.
+// Set TWP_ALLOWED_HOSTS to a comma-separated list of bare hostnames or IPs
+// (e.g. "192.168.1.10,myhostname") for deployments accessed via a LAN IP
+// or custom hostname. The port is appended automatically from TWP_BIND_PORT.
 func AllowedHosts() []string {
-	port := portOf(Addr)
-	return []string{
+	port := bindPort()
+	hosts := []string{
 		"localhost:" + port,
 		"127.0.0.1:" + port,
 	}
+	if v := os.Getenv("TWP_ALLOWED_HOSTS"); v != "" {
+		for _, h := range strings.Split(v, ",") {
+			if h = strings.TrimSpace(h); h != "" {
+				hosts = append(hosts, h+":"+port)
+			}
+		}
+	}
+	return hosts
 }
 
 // AllowedOrigins returns the closed set of Origin headers accepted on
@@ -70,11 +102,58 @@ func AllowedHosts() []string {
 // scheme prefix. CSRF middleware compares Origin verbatim against this
 // set on POST/PUT/DELETE.
 func AllowedOrigins() []string {
-	port := portOf(Addr)
-	return []string{
+	port := bindPort()
+	origins := []string{
 		"http://localhost:" + port,
 		"http://127.0.0.1:" + port,
 	}
+	if v := os.Getenv("TWP_ALLOWED_HOSTS"); v != "" {
+		for _, h := range strings.Split(v, ",") {
+			if h = strings.TrimSpace(h); h != "" {
+				origins = append(origins, "http://"+h+":"+port)
+			}
+		}
+	}
+	return origins
+}
+
+// Validate checks all env var overrides for correctness and returns a combined
+// error if any are invalid. Call this early in main before starting the server.
+func Validate() error {
+	var errs []string
+
+	if v := os.Getenv("TWP_BIND_PORT"); v != "" {
+		if err := validPort(v, "TWP_BIND_PORT"); err != nil {
+			errs = append(errs, err.Error())
+		}
+	}
+
+	if v := os.Getenv("TWP_ALLOWED_HOSTS"); v != "" {
+		for _, h := range strings.Split(v, ",") {
+			h = strings.TrimSpace(h)
+			if h == "" {
+				continue
+			}
+			// Bare hostnames only — port comes from TWP_BIND_PORT.
+			// A single colon means the user wrote host:port (old format).
+			if strings.Count(h, ":") == 1 {
+				errs = append(errs, "TWP_ALLOWED_HOSTS: "+h+": use a bare hostname or IP; port is set via TWP_BIND_PORT")
+			}
+		}
+	}
+
+	if len(errs) > 0 {
+		return fmt.Errorf("%s", strings.Join(errs, "; "))
+	}
+	return nil
+}
+
+func validPort(s, label string) error {
+	n, err := strconv.Atoi(s)
+	if err != nil || n < 1 || n > 65535 {
+		return fmt.Errorf("%s: %q is not a valid port (1-65535)", label, s)
+	}
+	return nil
 }
 
 // portOf extracts the port suffix from a host:port string.

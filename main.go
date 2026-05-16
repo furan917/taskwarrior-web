@@ -131,6 +131,11 @@ func main() {
 		logger.Warn("rotated log unavailable, falling back to stdout only", "err", logErr)
 	}
 
+	if err := config.Validate(); err != nil {
+		logger.Error("invalid configuration", "err", err)
+		os.Exit(1)
+	}
+
 	if err := checkDataDir(logger); err != nil {
 		logger.Error("data dir check failed", "err", err)
 		os.Exit(1)
@@ -140,8 +145,8 @@ func main() {
 	if err != nil {
 		if errors.Is(err, syscall.EADDRINUSE) {
 			logger.Error("port already in use",
-				"addr", config.Addr,
-				"hint", "another taskwarrior-web-portal instance? `lsof -nP -iTCP:"+addrPort(config.Addr)+"`")
+				"addr", config.Addr(),
+				"hint", "another taskwarrior-web-portal instance? `lsof -nP -iTCP:"+addrPort(config.Addr())+"`")
 			os.Exit(1)
 		}
 		logger.Error("server init failed", "err", err)

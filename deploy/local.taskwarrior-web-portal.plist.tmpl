@@ -1,0 +1,56 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTD/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+    <key>Label</key>
+    <string>local.taskwarrior-web-portal</string>
+
+    <key>ProgramArguments</key>
+    <array>
+        <string>__BIN__</string>
+    </array>
+
+    <key>RunAtLoad</key>
+    <true/>
+
+    <key>KeepAlive</key>
+    <dict>
+        <key>SuccessfulExit</key>
+        <false/>
+        <key>Crashed</key>
+        <true/>
+    </dict>
+
+    <key>ThrottleInterval</key>
+    <integer>10</integer>
+
+    <key>ExitTimeOut</key>
+    <integer>10</integer>
+
+    <key>ProcessType</key>
+    <string>Interactive</string>
+
+    <key>EnvironmentVariables</key>
+    <dict>
+        <key>PATH</key>
+        <string>/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin</string>
+        __TWP_ENV__
+    </dict>
+
+    <!--
+        NOTE: out.log and err.log are a panic safety net only. The primary
+        structured slog stream is written by the binary itself to
+        __LOG_DIR__/app.log with size-based rotation (10 MB/file, 3
+        backups, 30 day max age, gzip-compressed) via lumberjack. These
+        launchd-captured files should remain near-empty under normal
+        operation; they exist so a panic / pre-slog crash still leaves a
+        trace.
+    -->
+    <key>StandardOutPath</key>
+    <string>__LOG_DIR__/out.log</string>
+    <key>StandardErrorPath</key>
+    <string>__LOG_DIR__/err.log</string>
+    <key>StandardInPath</key>
+    <string>/dev/null</string>
+</dict>
+</plist>

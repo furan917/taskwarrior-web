@@ -1,0 +1,133 @@
+package views
+
+import (
+	"strings"
+
+	"github.com/furan917/taskwarrior-web-portal/internal/tw"
+)
+
+// PortalConfig carries effective portal bind/host settings for display.
+type PortalConfig struct {
+	BindAddr     string
+	AllowedHosts []string
+}
+
+templ ConfigInfoPage(p Page, info tw.ConfigInfo, portal PortalConfig) {
+	@Layout(p) {
+		<div class="mb-3 flex items-baseline justify-between">
+			<h2 class="text-lg font-medium">Configuration</h2>
+			<span class="text-xs text-zinc-500 dark:text-zinc-400">read-only · refresh to update</span>
+		</div>
+		<div class="mt-4">
+			<h3 class="mb-2 text-sm font-medium text-zinc-700 dark:text-zinc-300">Taskwarrior</h3>
+			<div class="rounded-lg border border-zinc-200 bg-white dark:border-zinc-800 dark:bg-zinc-900">
+				@configKV("Version", configOrDefault(info.Version, "unknown"))
+				@configKV("Data directory", configOrDefault(info.DataLocation, "~/.task (default)"))
+				@configKV("Date format", configOrDefault(info.DateFormat, "default"))
+				@configKVBool("Time tracking (journal.time)", info.JournalTime)
+				@configKV("Recurrence", configOrDefault(info.Recurrence, "on (default)"))
+				@configKV("Active context", configOrDefault(p.ActiveContext, "none"))
+			</div>
+		</div>
+		<div class="mt-6">
+			<h3 class="mb-2 text-sm font-medium text-zinc-700 dark:text-zinc-300">Sync</h3>
+			<div class="rounded-lg border border-zinc-200 bg-white dark:border-zinc-800 dark:bg-zinc-900">
+				@configKVMono("Server URL", configOrDefault(info.SyncServerURL, "Not configured"))
+				@configKVMono("Client ID", configOrDefault(info.SyncClientID, "Not configured"))
+			</div>
+		</div>
+		<div class="mt-6">
+			<h3 class="mb-2 text-sm font-medium text-zinc-700 dark:text-zinc-300">Hooks</h3>
+			if len(info.HookFiles) == 0 {
+				<div class="rounded-lg border border-zinc-200 bg-white px-4 py-3 text-sm text-zinc-500 dark:border-zinc-800 dark:bg-zinc-900 dark:text-zinc-400">
+					No hooks configured
+				</div>
+			} else {
+				<div class="rounded-lg border border-zinc-200 bg-white px-4 py-3 dark:border-zinc-800 dark:bg-zinc-900">
+					<ul class="space-y-1">
+						for _, name := range info.HookFiles {
+							<li class="font-mono text-sm text-zinc-800 dark:text-zinc-200">{ name }</li>
+						}
+					</ul>
+				</div>
+			}
+		</div>
+		<div class="mt-6">
+			<h3 class="mb-2 text-sm font-medium text-zinc-700 dark:text-zinc-300">User-defined Attributes</h3>
+			if len(info.UDAs) == 0 {
+				<div class="rounded-lg border border-zinc-200 bg-white px-4 py-3 text-sm text-zinc-500 dark:border-zinc-800 dark:bg-zinc-900 dark:text-zinc-400">
+					None defined
+				</div>
+			} else {
+				<div class="overflow-x-auto rounded-lg border border-zinc-200 bg-white dark:border-zinc-800 dark:bg-zinc-900">
+					<table class="w-full text-sm">
+						<thead>
+							<tr class="border-b border-zinc-200 dark:border-zinc-800">
+								<th class="px-4 py-2 text-left text-xs font-semibold uppercase tracking-wide text-zinc-500 dark:text-zinc-400">Name</th>
+								<th class="px-4 py-2 text-left text-xs font-semibold uppercase tracking-wide text-zinc-500 dark:text-zinc-400">Type</th>
+								<th class="px-4 py-2 text-left text-xs font-semibold uppercase tracking-wide text-zinc-500 dark:text-zinc-400">Label</th>
+								<th class="px-4 py-2 text-left text-xs font-semibold uppercase tracking-wide text-zinc-500 dark:text-zinc-400">Values</th>
+							</tr>
+						</thead>
+						<tbody class="divide-y divide-zinc-100 dark:divide-zinc-800">
+							for _, u := range info.UDAs {
+								<tr class="hover:bg-zinc-50 dark:hover:bg-zinc-800/50">
+									<td class="px-4 py-2 font-mono text-zinc-800 dark:text-zinc-200">{ u.Name }</td>
+									<td class="px-4 py-2 text-zinc-600 dark:text-zinc-400">{ configOrDefault(u.Type, "string") }</td>
+									<td class="px-4 py-2 text-zinc-600 dark:text-zinc-400">{ configOrDefault(u.Label, u.Name) }</td>
+									<td class="px-4 py-2 text-zinc-500 dark:text-zinc-500">{ udaValuesText(u.Values) }</td>
+								</tr>
+							}
+						</tbody>
+					</table>
+				</div>
+			}
+		</div>
+		<div class="mt-6">
+			<h3 class="mb-2 text-sm font-medium text-zinc-700 dark:text-zinc-300">Portal</h3>
+			<div class="rounded-lg border border-zinc-200 bg-white dark:border-zinc-800 dark:bg-zinc-900">
+				@configKVMono("Bind address", portal.BindAddr)
+				@configKVMono("Allowed hosts", strings.Join(portal.AllowedHosts, ", "))
+			</div>
+		</div>
+	}
+}
+
+templ configKV(label, value string) {
+	<div class="flex items-baseline gap-4 border-b border-zinc-100 px-4 py-2.5 text-sm last:border-0 dark:border-zinc-800">
+		<span class="w-44 shrink-0 text-zinc-500 dark:text-zinc-400">{ label }</span>
+		<span class="text-zinc-800 dark:text-zinc-200">{ value }</span>
+	</div>
+}
+
+templ configKVMono(label, value string) {
+	<div class="flex items-baseline gap-4 border-b border-zinc-100 px-4 py-2.5 text-sm last:border-0 dark:border-zinc-800">
+		<span class="w-44 shrink-0 text-zinc-500 dark:text-zinc-400">{ label }</span>
+		<span class="break-all font-mono text-zinc-800 dark:text-zinc-200">{ value }</span>
+	</div>
+}
+
+templ configKVBool(label string, enabled bool) {
+	<div class="flex items-baseline gap-4 border-b border-zinc-100 px-4 py-2.5 text-sm last:border-0 dark:border-zinc-800">
+		<span class="w-44 shrink-0 text-zinc-500 dark:text-zinc-400">{ label }</span>
+		if enabled {
+			<span class="text-emerald-600 dark:text-emerald-400">Enabled</span>
+		} else {
+			<span class="text-zinc-400 dark:text-zinc-500">Disabled</span>
+		}
+	</div>
+}
+
+func configOrDefault(v, fallback string) string {
+	if v == "" {
+		return fallback
+	}
+	return v
+}
+
+func udaValuesText(values []string) string {
+	if len(values) == 0 {
+		return "any"
+	}
+	return strings.Join(values, ", ")
+}

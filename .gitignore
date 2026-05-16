@@ -1,5 +1,6 @@
 # Build artefacts
 /bin/
+/taskwarrior-web-portal
 /tmp/
 *.log
 
@@ -46,5 +47,5 @@ walkthrough.mjs
 /playwright-report/
 /test-results/
 
-# Demo video (generated, not source)
-/docs/demo.mp4
+# Demo assets (generated, not source)
+/docs/

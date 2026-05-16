@@ -93,8 +93,9 @@ templ Layout(p Page) {
 			<main class="container mx-auto max-w-6xl p-3 sm:p-6">
 				<header class="mb-4 flex items-baseline justify-between">
 					<a href="/" class="text-2xl font-semibold tracking-tight">Taskwarrior Web Portal</a>
-					<div class="flex items-baseline gap-3">
+					<div class="flex items-center gap-1">
 						@themeToggle()
+						@configLink(p.ActiveView == "config")
 					</div>
 				</header>
 				@Nav(p.ActiveView, p.ActiveContext, p.Contexts, p.BuiltinReports, p.CustomReports)
@@ -172,6 +173,30 @@ templ themeToggle() {
 			<path d="m19.07 4.93-1.41 1.41"></path>
 		</svg>
 	</button>
+}
+
+// configLink is the gear icon in the header that links to /config. Active
+// styling matches the nav active state when the config page is open.
+templ configLink(active bool) {
+	<a
+		href="/config"
+		class={ configLinkClass(active) }
+		aria-label="Configuration"
+		title="Configuration"
+	>
+		<svg class="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+			<circle cx="12" cy="12" r="3"></circle>
+			<path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1 0 2.83 2 2 0 0 1-2.83 0l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-2 2 2 2 0 0 1-2-2v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83 0 2 2 0 0 1 0-2.83l.06-.06A1.65 1.65 0 0 0 4.68 15a1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1-2-2 2 2 0 0 1 2-2h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 0-2.83 2 2 0 0 1 2.83 0l.06.06A1.65 1.65 0 0 0 9 4.68a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 2-2 2 2 0 0 1 2 2v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 0 2 2 0 0 1 0 2.83l-.06.06A1.65 1.65 0 0 0 19.4 9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 2 2 2 2 0 0 1-2 2h-.09a1.65 1.65 0 0 0-1.51 1z"></path>
+		</svg>
+	</a>
+}
+
+func configLinkClass(active bool) string {
+	const base = "inline-flex h-7 w-7 items-center justify-center rounded focus:outline-none focus:ring-2 focus:ring-blue-500"
+	if active {
+		return base + " bg-zinc-900 text-white dark:bg-zinc-100 dark:text-zinc-900"
+	}
+	return base + " text-zinc-500 hover:bg-zinc-100 hover:text-zinc-900 dark:text-zinc-400 dark:hover:bg-zinc-800 dark:hover:text-zinc-100"
 }
 
 // confirmDialog is a single shared <dialog> wired in app.js to replace HTMX's

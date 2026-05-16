@@ -14,8 +14,8 @@ import (
 )
 
 // DefaultAddr is re-exported from config so the existing main.go default
-// path keeps working. New callers should reference config.Addr directly.
-const DefaultAddr = config.Addr
+// path keeps working. New callers should reference config.Addr() directly.
+var DefaultAddr = config.Addr()
 
 type Config struct {
 	Addr   string
