@@ -1,5 +1,12 @@
 # Changelog
 
+## [1.4.2](https://github.com/furan917/taskwarrior-web-portal/compare/v1.4.1...v1.4.2) (2026-05-16)
+
+
+### Bug Fixes
+
+* log improvement so sync shows run time ([5a34269](https://github.com/furan917/taskwarrior-web-portal/commit/5a34269dd253ac3071f2ec8cae1d916b5b4005a7))
+
 ## [1.4.1](https://github.com/furan917/taskwarrior-web-portal/compare/v1.4.0...v1.4.1) (2026-05-16)
 
 
