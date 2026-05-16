@@ -1,5 +1,12 @@
 # Changelog
 
+## [1.4.0](https://github.com/furan917/taskwarrior-web-portal/compare/v1.3.4...v1.4.0) (2026-05-16)
+
+
+### Features
+
+* add sync via config page + disable host check var ([a83309f](https://github.com/furan917/taskwarrior-web-portal/commit/a83309fc1dc911dd5c5b37bdcfd27ab97829460f))
+
 ## [1.3.4](https://github.com/furan917/taskwarrior-web-portal/compare/v1.3.3...v1.3.4) (2026-05-16)
 
 
