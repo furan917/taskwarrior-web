@@ -1,5 +1,12 @@
 # Changelog
 
+## [1.4.1](https://github.com/furan917/taskwarrior-web-portal/compare/v1.4.0...v1.4.1) (2026-05-16)
+
+
+### Bug Fixes
+
+* improve sync error output ([14fceb1](https://github.com/furan917/taskwarrior-web-portal/commit/14fceb13dba0fe948a4132c7c8e3ecdcf64c313d))
+
 ## [1.4.0](https://github.com/furan917/taskwarrior-web-portal/compare/v1.3.4...v1.4.0) (2026-05-16)
 
 
