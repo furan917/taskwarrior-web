@@ -23,15 +23,19 @@ func (f *Forms) Add(w http.ResponseWriter, r *http.Request) {
 	active := activeContext(f.TW, r)
 	openTasks := f.openTasksForDeps(r, "")
 	// Build the dropdown options for the modal's Context picker. Each entry
-	// carries the prefill values derived from the context's read filter via
-	// ContextPrefill so the JS handler can swap Tags / Project inputs on
-	// change without a server round-trip. The active context's prefill
-	// also seeds the initial form state below.
+	// carries the prefill values derived from the context's write filter (when
+	// set) or read filter (fallback) via ContextPrefill so the JS handler can
+	// swap Tags / Project inputs on change without a server round-trip. The
+	// active context's prefill also seeds the initial form state below.
 	contexts := f.TW.ContextsCached(r.Context())
 	options := make([]views.ContextOption, 0, len(contexts))
 	var prefillProject, prefillTags string
 	for _, c := range contexts {
-		proj, tag := views.ContextPrefill(c.ReadFilter)
+		filterForPrefill := c.ReadFilter
+		if c.WriteFilter != "" {
+			filterForPrefill = c.WriteFilter
+		}
+		proj, tag := views.ContextPrefill(filterForPrefill)
 		options = append(options, views.ContextOption{
 			Name:           c.Name,
 			PrefillTags:    tag,

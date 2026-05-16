@@ -32,7 +32,7 @@ templ ModalAdd(csrf string, udas []tw.UDA, projects, tags []string, activeContex
 			}
 			@formFields(taskForm{Project: prefillProject, Tags: prefillTags}, udas, projects, tags, allOpenTasks)
 			<div id="task-form-errors" class="empty:hidden border-t border-zinc-200 px-4 py-3 dark:border-zinc-700"></div>
-			<div class="flex items-center justify-end gap-2 border-t border-zinc-200 px-4 py-3 dark:border-zinc-700">
+			<div class="sticky bottom-0 z-10 flex items-center justify-end gap-2 border-t border-zinc-200 bg-white px-4 py-3 dark:border-zinc-700 dark:bg-zinc-900">
 				<button type="button" data-dismiss-modal class="rounded px-3 py-1.5 text-sm text-zinc-600 hover:bg-zinc-100 dark:text-zinc-300 dark:hover:bg-zinc-800">Cancel</button>
 				<button type="submit" class="rounded bg-blue-600 px-3 py-1.5 text-sm font-medium text-white hover:bg-blue-700">Add</button>
 			</div>

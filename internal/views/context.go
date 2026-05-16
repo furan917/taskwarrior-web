@@ -10,9 +10,10 @@ var contextFilterTagPat = regexp.MustCompile(`\+([a-zA-Z][a-zA-Z0-9_-]*)`)
 var contextFilterProjPat = regexp.MustCompile(`project:([a-zA-Z][a-zA-Z0-9._]*)`)
 
 // ContextOption is one entry in the Add modal's context picker dropdown.
-// PrefillTags / PrefillProject are derived from the context's read filter
-// via ContextPrefill; the JS handler reads them off the selected <option>
-// to update the Tags / Project inputs on change.
+// PrefillTags / PrefillProject are derived from the context's write filter
+// (falling back to read filter when unset) via ContextPrefill; the JS
+// handler reads them off the selected <option> to update the Tags / Project
+// inputs on change.
 type ContextOption struct {
 	Name           string
 	PrefillTags    string

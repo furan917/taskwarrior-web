@@ -29,6 +29,15 @@ func writeFormError(w http.ResponseWriter, err error) {
 		field, html.EscapeString(message))
 }
 
+// writeContextFormError writes an HTML error fragment for context form modals.
+// Produces plain text inside the already-styled #context-form-errors container.
+// Kept separate from writeFormError so the task form error path is untouched.
+func writeContextFormError(w http.ResponseWriter, status int, message string) {
+	w.Header().Set("Content-Type", "text/html; charset=utf-8")
+	w.WriteHeader(status)
+	fmt.Fprintf(w, `<span role="alert">%s</span>`, html.EscapeString(message))
+}
+
 // classifyValidationError takes an error from tw.AddArgs / tw.ModifyArgs /
 // readUDAArgs and returns the form-field name plus a user-readable message
 // the modal can display. Falls back to the raw error text when no known

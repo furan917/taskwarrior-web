@@ -201,6 +201,29 @@ func (c *Client) Run(ctx context.Context, args ...string) error {
 	return err
 }
 
+// Add executes `task add <args>`. When bypassContextWrite is true it injects
+// rc.context=none ahead of user args so Taskwarrior skips native write-filter
+// application; this is used when the active context's write filter contains
+// logical operators that Taskwarrior would silently prepend to the description.
+// The rc.context=none token is generated internally and is not subject to
+// guardArgs (which only checks caller-supplied args).
+func (c *Client) Add(ctx context.Context, bypassContextWrite bool, args ...string) error {
+	if err := guardArgs(args); err != nil {
+		return err
+	}
+	var full []string
+	if bypassContextWrite {
+		full = make([]string, 0, len(safetyArgs)+1+len(args))
+		full = append(full, safetyArgs...)
+		full = append(full, "rc.context=none")
+		full = append(full, args...)
+	} else {
+		full = c.argv(args...)
+	}
+	_, err := c.runRaw(ctx, full)
+	return err
+}
+
 // Annotate appends a note to the task. Description is treated as literal
 // positional text via the `--` separator so embedded DOM tokens (+tag,
 // due:tomorrow, rc.foo=bar) are stored verbatim and never interpreted as
@@ -1363,6 +1386,7 @@ func (c *Client) ListContexts(ctx context.Context) ([]Context, error) {
 func parseContextsTable(raw string) []Context {
 	byName := map[string]*Context{}
 	order := []string{}
+	var lastName string // last seen valid context name, for blank-name continuation rows
 
 	for line := range strings.SplitSeq(raw, "\n") {
 		line = strings.TrimSpace(line)
@@ -1391,24 +1415,41 @@ func parseContextsTable(raw string) []Context {
 		if len(fields) < 2 {
 			continue
 		}
-		name := fields[0]
-		if !ContextNamePattern.MatchString(name) {
-			continue
-		}
-		typ := strings.ToLower(fields[1])
-		if typ != "read" && typ != "write" {
+
+		// Taskwarrior 3.x prints one row per type for each context. When a
+		// context has both a read and write filter, the second row has a blank
+		// name column, so after TrimSpace fields[0] is the type ("read"/"write")
+		// and fields[1] is the first token of the filter. Detect this by
+		// checking whether fields[1] is a type keyword; if not, treat fields[0]
+		// as the type and carry lastName forward as the name.
+		var name, typ string
+		var filterStart int
+		f0 := strings.ToLower(fields[0])
+		f1 := strings.ToLower(fields[1])
+		if (f1 == "read" || f1 == "write") && ContextNamePattern.MatchString(fields[0]) {
+			// Normal row: name type filter...
+			name = fields[0]
+			lastName = name
+			typ = f1
+			filterStart = 2
+		} else if (f0 == "read" || f0 == "write") && lastName != "" {
+			// Continuation row: name column was blank; type is fields[0].
+			name = lastName
+			typ = f0
+			filterStart = 1
+		} else {
 			continue
 		}
 
 		// Active flag is the trailing field if it looks like yes/no; the
-		// filter text is everything between Type and Active.
+		// filter text is everything between the type and the active flag.
 		active := false
 		filterEnd := len(fields)
 		if last := strings.ToLower(fields[len(fields)-1]); last == "yes" || last == "no" {
 			active = last == "yes"
 			filterEnd = len(fields) - 1
 		}
-		filter := strings.Join(fields[2:filterEnd], " ")
+		filter := strings.Join(fields[filterStart:filterEnd], " ")
 
 		entry, ok := byName[name]
 		if !ok {

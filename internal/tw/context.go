@@ -45,6 +45,24 @@ func FilterContainsRcOverride(filter string) bool {
 	return false
 }
 
+// FilterContainsLogicalOperator reports whether a filter expression uses
+// standalone logical-operator keywords (or, and, not - case-insensitive)
+// or parentheses. These are valid in read filters but corrupt task
+// descriptions when applied as write-filter modifications during `task add`:
+// Taskwarrior 3.x treats unrecognised tokens as bare words and silently
+// prepends them to the task description (verified against 3.4.2).
+func FilterContainsLogicalOperator(filter string) bool {
+	if strings.ContainsAny(filter, "()") {
+		return true
+	}
+	for tok := range strings.FieldsSeq(strings.ToLower(filter)) {
+		if tok == "or" || tok == "and" || tok == "not" {
+			return true
+		}
+	}
+	return false
+}
+
 // exportIncompatibleToken matches the `-+word` pattern: a tag negation using
 // the "has tag" operator. `task list` / `task next` accept this form, but
 // `task export` does not - it returns exit 2 with "The expression could not
@@ -73,12 +91,32 @@ func (c Context) SafeReadFilter() string {
 	return c.ReadFilter
 }
 
-// SafeWriteFilter mirrors SafeReadFilter for the write side. We don't
-// currently use the write filter for argv composition (the form-prefill
-// helper reads the filter shape but doesn't pass it back to Taskwarrior),
-// so this is here for symmetry and future safety.
+// FilterContainsNegation reports whether a filter expression contains a token
+// that removes a tag (starts with "-"). Negation tokens are valid in read
+// filters but have no meaning in write filters: a new task has no tags to
+// remove, and Taskwarrior may silently ignore or misapply them.
+func FilterContainsNegation(filter string) bool {
+	for tok := range strings.FieldsSeq(filter) {
+		if strings.HasPrefix(tok, "-") {
+			return true
+		}
+	}
+	return false
+}
+
+// SafeWriteFilter returns the context's write filter only when it is safe to
+// apply as a modification during `task add`. Returns empty when the filter
+// contains rc.* overrides, logical operators (or, and, not, parentheses), or
+// negation tokens (-tag): Taskwarrior 3.x treats unrecognised tokens as bare
+// words and prepends them to the task description, silently corrupting it.
 func (c Context) SafeWriteFilter() string {
 	if FilterContainsRcOverride(c.WriteFilter) {
+		return ""
+	}
+	if FilterContainsLogicalOperator(c.WriteFilter) {
+		return ""
+	}
+	if FilterContainsNegation(c.WriteFilter) {
 		return ""
 	}
 	return c.WriteFilter

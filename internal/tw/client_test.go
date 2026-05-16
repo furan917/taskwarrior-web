@@ -747,6 +747,36 @@ home  read   +home
 	}
 }
 
+// TestClient_ParseContextsTable_BlankNameContinuationRows covers the real
+// Taskwarrior 3.x output format where only the first row for a context carries
+// the name; the write-filter row has a blank name column.
+func TestClient_ParseContextsTable_BlankNameContinuationRows(t *testing.T) {
+	raw := `Name     Type  Definition                  Active
+-------- ----- --------------------------- ------
+finance  read  project:finance or +finance yes
+         write project:finance             yes
+personal read  +personal                   no
+         write +personal                   no
+urgent   read  priority:H                  no
+
+3 contexts (1 of which are active)
+`
+	got := parseContextsTable(raw)
+	if len(got) != 3 {
+		t.Fatalf("got %d contexts, want 3: %+v", len(got), got)
+	}
+	// Sorted alphabetically: finance, personal, urgent.
+	if got[0].Name != "finance" || got[0].ReadFilter != "project:finance or +finance" || got[0].WriteFilter != "project:finance" || !got[0].Active {
+		t.Errorf("finance: %+v", got[0])
+	}
+	if got[1].Name != "personal" || got[1].ReadFilter != "+personal" || got[1].WriteFilter != "+personal" || got[1].Active {
+		t.Errorf("personal: %+v", got[1])
+	}
+	if got[2].Name != "urgent" || got[2].ReadFilter != "priority:H" || got[2].WriteFilter != "" {
+		t.Errorf("urgent: %+v", got[2])
+	}
+}
+
 // TestClient_ParseContextsTable_NoneDefined: empty / "No contexts defined."
 // returns an empty slice without error.
 func TestClient_ParseContextsTable_NoneDefined(t *testing.T) {

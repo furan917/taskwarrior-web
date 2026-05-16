@@ -23,6 +23,31 @@ func activeContext(c *tw.Client, r *http.Request) string {
 	return c.ActiveContext(ctx)
 }
 
+// activeContextHasUnsafeWriteFilter reports whether the currently active
+// context has a write filter that Taskwarrior cannot safely apply as a
+// modification (i.e. it contains logical operators or rc.* overrides). Used
+// by the task Create handler to decide whether to bypass native write-filter
+// application and rely solely on the form's pre-filled values instead.
+func activeContextHasUnsafeWriteFilter(c *tw.Client, r *http.Request) bool {
+	name := activeContext(c, r)
+	if name == "" {
+		return false
+	}
+	for _, ctx := range c.ContextsCached(r.Context()) {
+		if ctx.Name == name {
+			// Taskwarrior falls back to the read filter as the write filter
+			// when no write filter is explicitly set, so we must check the
+			// effective filter, not just WriteFilter.
+			effective := ctx.WriteFilter
+			if effective == "" {
+				effective = ctx.ReadFilter
+			}
+			return tw.FilterContainsLogicalOperator(effective) || tw.FilterContainsNegation(effective)
+		}
+	}
+	return false
+}
+
 // namedContextsForRender converts the cached []tw.Context list into the
 // flat shape the views envelope wants. Active is recomputed against the
 // per-request active name so the dropdown's checkmark always tracks the
@@ -177,30 +202,38 @@ func (c *Contexts) DeleteContext(w http.ResponseWriter, r *http.Request) {
 func parseContextForm(w http.ResponseWriter, r *http.Request) (name, readFilter, writeFilter string, ok bool) {
 	r.Body = http.MaxBytesReader(w, r.Body, 64<<10)
 	if err := r.ParseForm(); err != nil {
-		http.Error(w, "bad form", http.StatusBadRequest)
+		writeContextFormError(w, http.StatusBadRequest, "bad form data")
 		return "", "", "", false
 	}
 	name = strings.TrimSpace(r.FormValue("name"))
 	readFilter = strings.TrimSpace(r.FormValue("read_filter"))
 	writeFilter = strings.TrimSpace(r.FormValue("write_filter"))
 	if len(readFilter) > 1024 || len(writeFilter) > 1024 {
-		http.Error(w, "filter expression too long (max 1024 characters)", http.StatusBadRequest)
+		writeContextFormError(w, http.StatusBadRequest, "filter expression too long (max 1024 characters)")
 		return "", "", "", false
 	}
 	if !tw.ContextNamePattern.MatchString(name) {
-		http.Error(w, "invalid context name - letters, digits, dash and underscore only", http.StatusBadRequest)
+		writeContextFormError(w, http.StatusBadRequest, "invalid context name: letters, digits, dash and underscore only")
 		return "", "", "", false
 	}
 	if readFilter == "" {
-		http.Error(w, "read filter is required", http.StatusBadRequest)
+		writeContextFormError(w, http.StatusBadRequest, "read filter is required")
 		return "", "", "", false
 	}
 	if tw.FilterContainsRcOverride(readFilter) {
-		http.Error(w, "read filter must not contain rc.* overrides", http.StatusBadRequest)
+		writeContextFormError(w, http.StatusBadRequest, "read filter must not contain rc.* overrides")
 		return "", "", "", false
 	}
 	if writeFilter != "" && tw.FilterContainsRcOverride(writeFilter) {
-		http.Error(w, "write filter must not contain rc.* overrides", http.StatusBadRequest)
+		writeContextFormError(w, http.StatusBadRequest, "write filter must not contain rc.* overrides")
+		return "", "", "", false
+	}
+	if writeFilter != "" && tw.FilterContainsLogicalOperator(writeFilter) {
+		writeContextFormError(w, http.StatusBadRequest, "The write filter must be a simple expression. Logical operators (or, and, not) and parentheses are not supported.")
+		return "", "", "", false
+	}
+	if writeFilter != "" && tw.FilterContainsNegation(writeFilter) {
+		writeContextFormError(w, http.StatusBadRequest, "The write filter must not contain negation tokens (e.g. -tag). Only additive expressions like +tag or project:name are supported.")
 		return "", "", "", false
 	}
 	return name, readFilter, writeFilter, true
@@ -214,8 +247,8 @@ func parseContextForm(w http.ResponseWriter, r *http.Request) (name, readFilter,
 func (c *Contexts) contextFormError(w http.ResponseWriter, op string, err error) {
 	c.Logger.Error(op+" context failed", "err", err)
 	if errors.Is(err, tw.ErrInvalid) {
-		http.Error(w, err.Error(), http.StatusBadRequest)
+		writeContextFormError(w, http.StatusBadRequest, err.Error())
 		return
 	}
-	http.Error(w, op+" context failed", http.StatusInternalServerError)
+	writeContextFormError(w, http.StatusInternalServerError, op+" context failed")
 }

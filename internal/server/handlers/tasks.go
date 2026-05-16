@@ -46,7 +46,12 @@ func (t *Tasks) Create(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	args = append(args, udaArgs...)
-	if err := t.TW.Run(r.Context(), append([]string{"add"}, args...)...); err != nil {
+	// If the active context has an unsafe write filter (contains logical
+	// operators), bypass Taskwarrior's native write-filter application so it
+	// cannot prepend "or"/"and"/"not" to the task description. The form layer
+	// already seeds Tags/Project from the write filter via ContextPrefill.
+	bypass := activeContextHasUnsafeWriteFilter(t.TW, r)
+	if err := t.TW.Add(r.Context(), bypass, append([]string{"add"}, args...)...); err != nil {
 		t.Logger.Error("task add failed", "err", err)
 		if writeIfTaskParseError(w, err) {
 			return

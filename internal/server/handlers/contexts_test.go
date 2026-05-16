@@ -675,6 +675,53 @@ func TestContexts_CreateContext_RejectsLongWriteFilter(t *testing.T) {
 	}
 }
 
+func TestContexts_CreateContext_RejectsOrWriteFilter(t *testing.T) {
+	installFakeTaskWith(t, fakeTaskOpts{})
+	c := newContexts()
+
+	form := url.Values{"name": {"work"}, "read_filter": {"+work"}, "write_filter": {"+work or project:work"}}
+	req := httptest.NewRequest(http.MethodPost, "/contexts", strings.NewReader(form.Encode()))
+	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+	rr := httptest.NewRecorder()
+	c.CreateContext(rr, req)
+
+	if rr.Code != http.StatusBadRequest {
+		t.Errorf("write filter with 'or': got %d want 400", rr.Code)
+	}
+}
+
+func TestContexts_CreateContext_RejectsAndWriteFilter(t *testing.T) {
+	installFakeTaskWith(t, fakeTaskOpts{})
+	c := newContexts()
+
+	form := url.Values{"name": {"work"}, "read_filter": {"+work"}, "write_filter": {"+work and +tech"}}
+	req := httptest.NewRequest(http.MethodPost, "/contexts", strings.NewReader(form.Encode()))
+	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+	rr := httptest.NewRecorder()
+	c.CreateContext(rr, req)
+
+	if rr.Code != http.StatusBadRequest {
+		t.Errorf("write filter with 'and': got %d want 400", rr.Code)
+	}
+}
+
+func TestContexts_CreateContext_AcceptsSimpleWriteFilter(t *testing.T) {
+	installFakeTaskWith(t, fakeTaskOpts{})
+	c := newContexts()
+
+	for _, wf := range []string{"+tech", "project:work", "+tech project:work"} {
+		form := url.Values{"name": {"work"}, "read_filter": {"+work"}, "write_filter": {wf}}
+		req := httptest.NewRequest(http.MethodPost, "/contexts", strings.NewReader(form.Encode()))
+		req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+		rr := httptest.NewRecorder()
+		c.CreateContext(rr, req)
+
+		if rr.Code == http.StatusBadRequest && strings.Contains(rr.Body.String(), "logical") {
+			t.Errorf("simple write filter %q should not be rejected: %s", wf, rr.Body.String())
+		}
+	}
+}
+
 func TestContexts_CreateContext_AcceptsMaxLengthFilter(t *testing.T) {
 	installFakeTaskWith(t, fakeTaskOpts{})
 	c := newContexts()
