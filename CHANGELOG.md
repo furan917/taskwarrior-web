@@ -1,5 +1,14 @@
 # Changelog
 
+## [1.4.5](https://github.com/furan917/taskwarrior-web-portal/compare/v1.4.4...v1.4.5) (2026-05-16)
+
+
+### Bug Fixes
+
+* add additional timehandling stats ([26b113f](https://github.com/furan917/taskwarrior-web-portal/commit/26b113fc0421eb6bec2936d651e45784625d3d55))
+* fmting fix ([874f87d](https://github.com/furan917/taskwarrior-web-portal/commit/874f87d157cd6496f42c1d816cdede01d029d456))
+* timesheet didnt show weekly total time or project roundup ([23c5b19](https://github.com/furan917/taskwarrior-web-portal/commit/23c5b190052fd3ab42a6da9e787d8c2f1a126ffd))
+
 ## [1.4.4](https://github.com/furan917/taskwarrior-web-portal/compare/v1.4.3...v1.4.4) (2026-05-16)
 
 
