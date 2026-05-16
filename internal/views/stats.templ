@@ -23,8 +23,9 @@ type Stats struct {
 	MonthlyHistory      []MonthCount  // newest-first; up to 12 months of added/completed counts.
 	BurndownDaily       []BurndownBar // oldest-first; 30 daily snapshots of pending count.
 	BurndownWeekly      []BurndownBar // oldest-first; 13 weekly snapshots of pending count.
-	NetFixRate          float64 // tasks/day cleared since peak; 0 if no convergence.
-	EstimatedCompletion string  // "YYYY-MM-DD (Xmo)" or "" if no convergence.
+	NetFixRate          float64        // tasks/day cleared since peak; 0 if no convergence.
+	EstimatedCompletion string         // "YYYY-MM-DD (Xmo)" or "" if no convergence.
+	TimeHistory         []TimeDayCount // newest-first; last 30 days of tracked time; nil if journal.time disabled or no data
 }
 
 // DayCount pairs a day label with how many tasks completed on that day.
@@ -33,6 +34,14 @@ type DayCount struct {
 	Label string // short label like "Mon", "5/7"
 	Date  string // ISO YYYY-MM-DD
 	Count int
+}
+
+// TimeDayCount pairs a day label with the total tracked time in minutes.
+// Minutes (not time.Duration) keeps the type import-free and chart-math simple.
+type TimeDayCount struct {
+	Label   string // short label like "5/7"
+	Date    string // ISO YYYY-MM-DD
+	Minutes int    // total tracked minutes on this day
 }
 
 // MonthCount is one row in the monthly history table: tasks added and
@@ -79,6 +88,12 @@ templ StatsPage(p Page, stats Stats) {
 			<div class="mt-6">
 				<h3 class="mb-2 text-sm font-medium text-zinc-700 dark:text-zinc-300">Completion history</h3>
 				@completionChart(stats.History)
+			</div>
+		}
+		if len(stats.TimeHistory) > 0 {
+			<div class="mt-6">
+				<h3 class="mb-2 text-sm font-medium text-zinc-700 dark:text-zinc-300">{ fmt.Sprintf("Time tracked per day · %dd", stats.WindowDays) }</h3>
+				@timeTrackedChart(stats.TimeHistory)
 			</div>
 		}
 		if len(stats.BurndownDaily) > 0 || len(stats.BurndownWeekly) > 0 {
@@ -172,6 +187,16 @@ func statCardClass(tone string) string {
 	default:
 		return base + " border-zinc-200 bg-white text-zinc-900 dark:border-zinc-800 dark:bg-zinc-900 dark:text-zinc-100"
 	}
+}
+
+templ timeTrackedChart(history []TimeDayCount) {
+	<div class="rounded-lg border border-zinc-200 bg-white p-4 dark:border-zinc-800 dark:bg-zinc-900">
+		@timeChartSVG(history)
+		<div class="mt-2 flex items-center justify-center gap-1.5">
+			<span class="inline-block h-2.5 w-2.5 rounded-sm bg-blue-500/70 dark:bg-blue-400/60"></span>
+			<span class="text-[11px] text-zinc-400 dark:text-zinc-500">hours tracked per day</span>
+		</div>
+	</div>
 }
 
 // completionChart renders a simple SVG bar chart of completed-per-day for

@@ -39,6 +39,9 @@ type fakeTaskOpts struct {
 	// whether the sync command succeeds (0) or fails.
 	SyncOutput   string
 	SyncExitCode int
+	// JournalTimeRC is returned for `task _get rc.journal.time`. Set to "yes"
+	// to simulate journal.time being enabled; empty string (default) = disabled.
+	JournalTimeRC string
 }
 
 type fakeContext struct {
@@ -89,6 +92,7 @@ done
 	// JSON to the active-context call.
 	b.WriteString(`case "$*" in` + "\n")
 	b.WriteString(`  *"_get rc.context"*) printf '` + opts.ActiveContext + `'; exit 0;;` + "\n")
+	b.WriteString(`  *"_get rc.journal.time"*) printf '` + opts.JournalTimeRC + `'; exit 0;;` + "\n")
 	if len(opts.Contexts) > 0 {
 		var table strings.Builder
 		table.WriteString("Name  Type   Filter   Active\\n")

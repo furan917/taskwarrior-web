@@ -643,9 +643,9 @@ func (v *Views) Done(w http.ResponseWriter, r *http.Request) {
 
 // Stats renders the dashboard at /stats: count cards, completion history,
 // burndown charts, monthly history table, and net fix rate. Five Export calls
-// back the page (open, completed-14d, completed-365d, recurring, deleted);
+// back the page (open, completed-30d, completed-365d, recurring, deleted);
 // everything else is computed in Go from those slices to keep wall time low.
-const statsHistoryDays = 14
+const statsHistoryDays = 30
 
 func (v *Views) Stats(w http.ResponseWriter, r *http.Request) {
 	open, err := v.exportWithContext(r, "(status:pending or status:waiting)")
@@ -697,6 +697,9 @@ func (v *Views) Stats(w http.ResponseWriter, r *http.Request) {
 	stats.BurndownDaily = computeBurndown(open, allCompleted, true, 30, now)
 	stats.BurndownWeekly = computeBurndown(open, allCompleted, false, 13, now)
 	stats.NetFixRate, stats.EstimatedCompletion = computeBurndownRates(open, allCompleted, deleted, recurring, now)
+	if v.TW.JournalTimeEnabled(r.Context()) {
+		stats.TimeHistory = computeTimeHistory(append(open, allCompleted...), statsHistoryDays, now)
+	}
 	page := v.buildPage(r, "Stats", "stats", false)
 	renderHTML(w, r, "Stats", views.StatsPage(page, stats), v.Logger)
 }
@@ -1014,6 +1017,46 @@ func computeMonthlyHistory(open, completed []tw.Task) []views.MonthCount {
 			Added:     added,
 			Completed: done,
 		})
+	}
+	return result
+}
+
+// computeTimeHistory builds a newest-first slice of TimeDayCount for the last
+// N days. Each entry holds the total tracked minutes for that calendar day
+// across all provided tasks. Returns nil when no day has tracked time.
+func computeTimeHistory(tasks []tw.Task, days int, now time.Time) []views.TimeDayCount {
+	buckets := map[string]int{} // YYYY-MM-DD -> minutes
+	for _, t := range tasks {
+		for _, s := range tw.ParseSessions(t, now) {
+			end := s.Stop
+			if end.IsZero() {
+				end = now
+			}
+			if end.Before(s.Start) {
+				continue
+			}
+			key := s.Start.Local().Format("2006-01-02")
+			buckets[key] += int(end.Sub(s.Start).Minutes())
+		}
+	}
+
+	hasData := false
+	result := make([]views.TimeDayCount, 0, days)
+	for i := range days {
+		day := now.AddDate(0, 0, -i)
+		key := day.Format("2006-01-02")
+		m := buckets[key]
+		if m > 0 {
+			hasData = true
+		}
+		result = append(result, views.TimeDayCount{
+			Label:   day.Format("1/2"),
+			Date:    key,
+			Minutes: m,
+		})
+	}
+	if !hasData {
+		return nil
 	}
 	return result
 }

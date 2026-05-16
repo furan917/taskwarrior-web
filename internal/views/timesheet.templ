@@ -30,11 +30,21 @@ type ProjectTimeNode struct {
 	Children      []ProjectTimeNode
 }
 
+// WeekTotal is one row in the recent-weeks summary: a week's total tracked time
+// with a link to navigate to it.
+type WeekTotal struct {
+	Label         string        // "11-17 May 2026"
+	URL           string        // "/timesheet?view=week&date=2026-05-11"
+	Total         time.Duration
+	IsCurrentWeek bool
+}
+
 // TimesheetData is the full data set passed to the timesheet page.
 type TimesheetData struct {
 	Days          []TimesheetDay
 	TotalDuration time.Duration
 	ProjectTotals []ProjectTimeNode // tree of project totals; nil when only one project
+	WeekSummary   []WeekTotal       // last N weeks with tracked time; nil if journal.time disabled
 	View          string            // TimesheetViewWeek / TimesheetViewDay
 	Anchor        time.Time         // the date the user navigated to
 	Title         string            // "5 May – 11 May 2026" / "Mon 5 May 2026"
@@ -80,6 +90,12 @@ templ timesheetContent(data TimesheetData) {
 		<div class="mt-4">
 			<h3 class="mb-2 text-sm font-medium text-zinc-700 dark:text-zinc-300">Time by project</h3>
 			@projectTimeTree(data.ProjectTotals, data.TotalDuration)
+		</div>
+	}
+	if len(data.WeekSummary) > 1 {
+		<div class="mt-4">
+			<h3 class="mb-3 text-xs font-semibold uppercase tracking-wider text-zinc-400 dark:text-zinc-500">Recent weeks</h3>
+			@weekSummaryTable(data.WeekSummary)
 		</div>
 	}
 }
@@ -231,6 +247,35 @@ func sessionsEditURL(s tw.Session) string {
 	return "/forms/sessions/" + s.TaskUUID +
 		"?day=" + s.Start.Local().Format("2006-01-02") +
 		"&from=timesheet"
+}
+
+templ weekSummaryTable(weeks []WeekTotal) {
+	<div class="space-y-0.5">
+		for _, w := range weeks {
+			<a href={ templ.SafeURL(w.URL) } class={ weekSummaryRowClass(w.IsCurrentWeek) }>
+				<span class={ weekSummaryLabelClass(w.IsCurrentWeek) + " flex-1 truncate" }>{ w.Label }</span>
+				if w.IsCurrentWeek {
+					<span class="shrink-0 text-xs font-medium text-blue-500 dark:text-blue-400">this week</span>
+				}
+				<span class="w-16 shrink-0 text-right text-sm font-semibold tabular-nums text-zinc-800 dark:text-zinc-100">{ formatElapsed(w.Total) }</span>
+			</a>
+		}
+	</div>
+}
+
+func weekSummaryRowClass(isCurrent bool) string {
+	base := "flex items-baseline gap-3 rounded-md px-3 py-2.5 transition-colors"
+	if isCurrent {
+		return base + " bg-blue-50 hover:bg-blue-100 dark:bg-blue-950/40 dark:hover:bg-blue-950/70"
+	}
+	return base + " hover:bg-zinc-100 dark:hover:bg-zinc-800/60"
+}
+
+func weekSummaryLabelClass(isCurrent bool) string {
+	if isCurrent {
+		return "text-sm font-medium text-zinc-800 dark:text-zinc-100"
+	}
+	return "text-sm text-zinc-600 dark:text-zinc-400"
 }
 
 templ projectTimeTree(nodes []ProjectTimeNode, grandTotal time.Duration) {

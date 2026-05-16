@@ -11,6 +11,8 @@ import (
 	"github.com/furan917/taskwarrior-web-portal/internal/views"
 )
 
+const weekSummaryWeeks = 8
+
 func (v *Views) Timesheet(w http.ResponseWriter, r *http.Request) {
 	ctx := r.Context()
 	now := time.Now()
@@ -36,9 +38,16 @@ func (v *Views) Timesheet(w http.ResponseWriter, r *http.Request) {
 
 	from, to := timesheetWindow(view, anchor)
 
+	// Fetch from the wider of: the view window or the week-summary lookback.
+	summaryFrom := views.AddDays(views.StartOfMonday(views.DateOnly(now)), -7*(weekSummaryWeeks-1))
+	fetchFrom := from
+	if summaryFrom.Before(fetchFrom) {
+		fetchFrom = summaryFrom
+	}
+
 	tasks, err := v.exportWithContext(r,
 		"(status:pending or status:waiting or status:completed)",
-		"modified.after:"+from.UTC().Format("20060102T150405Z"),
+		"modified.after:"+fetchFrom.UTC().Format("20060102T150405Z"),
 	)
 	if err != nil {
 		v.Logger.Error("timesheet fetch failed", "err", err)
@@ -48,6 +57,7 @@ func (v *Views) Timesheet(w http.ResponseWriter, r *http.Request) {
 
 	sessions := tw.SessionsInRange(tasks, from, to, now)
 	data := BuildTimesheetPage(view, anchor, sessions, now)
+	data.WeekSummary = computeWeekSummaries(tasks, weekSummaryWeeks, now)
 	renderHTML(w, r, "Timesheet", views.TimesheetPage(page, true, data), v.Logger)
 }
 
@@ -174,6 +184,35 @@ func buildProjectTimeTree(sessions []tw.Session, now time.Time) []views.ProjectT
 	sort.Slice(result, func(i, j int) bool {
 		return result[i].SubtreeTotal > result[j].SubtreeTotal
 	})
+	return result
+}
+
+// computeWeekSummaries builds a newest-first list of weeks (up to n) that have
+// tracked time. Each week covers Mon–Sun local time; the current week may be
+// partial. Weeks with zero tracked time are omitted.
+func computeWeekSummaries(tasks []tw.Task, n int, now time.Time) []views.WeekTotal {
+	thisMonday := views.StartOfMonday(views.DateOnly(now))
+	var result []views.WeekTotal
+	for i := 0; i < n; i++ {
+		weekStart := views.AddDays(thisMonday, -7*i)
+		weekEnd := views.AddDays(weekStart, 7)
+		sessions := tw.SessionsInRange(tasks, weekStart, weekEnd, now)
+		var total time.Duration
+		for _, s := range sessions {
+			total += s.Duration(now)
+		}
+		if total == 0 {
+			continue
+		}
+		weekLast := views.AddDays(weekEnd, -1)
+		label := fmt.Sprintf("%s – %s", weekStart.Format("2 Jan"), weekLast.Format("2 Jan 2006"))
+		result = append(result, views.WeekTotal{
+			Label:         label,
+			URL:           fmt.Sprintf("/timesheet?view=week&date=%s", weekStart.Format("2006-01-02")),
+			Total:         total,
+			IsCurrentWeek: i == 0,
+		})
+	}
 	return result
 }
 

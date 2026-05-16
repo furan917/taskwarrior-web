@@ -130,6 +130,124 @@ func completionChartSVG(history []DayCount) templ.Component {
 	})
 }
 
+// timeChartSVG renders a bar chart of tracked minutes per day. Structurally
+// identical to completionChartSVG but the y-axis labels show hours ("2h",
+// "1h 30m") and the tooltip shows the formatted duration. Blue palette to
+// distinguish from the emerald completion chart above it.
+func timeChartSVG(history []TimeDayCount) templ.Component {
+	return templ.ComponentFunc(func(ctx context.Context, w io.Writer) error {
+		if len(history) == 0 {
+			return nil
+		}
+		const (
+			width     = 800
+			height    = 140
+			padTop    = 8
+			padBottom = 22
+			padLeft   = 36 // wider: "2h 30m" is longer than a count
+			padRight  = 8
+			barGap    = 2
+		)
+		drawWidth := width - padLeft - padRight
+		drawHeight := height - padTop - padBottom
+
+		// Reverse to oldest-first for left-to-right rendering.
+		ordered := make([]TimeDayCount, len(history))
+		for i, d := range history {
+			ordered[len(history)-1-i] = d
+		}
+
+		maxMin := 0
+		for _, d := range ordered {
+			if d.Minutes > maxMin {
+				maxMin = d.Minutes
+			}
+		}
+		if maxMin == 0 {
+			maxMin = 60
+		}
+
+		barWidth := float64(drawWidth)/float64(len(ordered)) - barGap
+		if barWidth < 1 {
+			barWidth = 1
+		}
+
+		totalMin := 0
+		for _, d := range ordered {
+			totalMin += d.Minutes
+		}
+		ariaLabel := fmt.Sprintf(
+			"Time tracked - %d days, %s total",
+			len(ordered), fmtMinutes(totalMin))
+
+		var b strings.Builder
+		fmt.Fprintf(&b,
+			`<svg viewBox="0 0 %d %d" preserveAspectRatio="xMidYMid meet" class="h-32 w-full" role="img" aria-label="%s">`,
+			width, height, templ.EscapeString(ariaLabel))
+		fmt.Fprintf(&b,
+			`<line x1="%d" y1="%d" x2="%d" y2="%d" class="stroke-zinc-200 dark:stroke-zinc-700" stroke-width="1"/>`,
+			padLeft, padTop+drawHeight, width-padRight, padTop+drawHeight)
+		fmt.Fprintf(&b,
+			`<line x1="%d" y1="%d" x2="%d" y2="%d" class="stroke-zinc-200 dark:stroke-zinc-700" stroke-width="1"/>`,
+			padLeft, padTop, padLeft, padTop+drawHeight)
+		fmt.Fprintf(&b,
+			`<text x="%d" y="%d" text-anchor="end" class="fill-zinc-400 text-[10px] dark:fill-zinc-500">%s</text>`,
+			padLeft-4, padTop+10, fmtMinutes(maxMin))
+		fmt.Fprintf(&b,
+			`<text x="%d" y="%d" text-anchor="end" class="fill-zinc-400 text-[10px] dark:fill-zinc-500">0</text>`,
+			padLeft-4, padTop+drawHeight)
+
+		for i, d := range ordered {
+			x := float64(padLeft) + float64(i)*(barWidth+barGap)
+			h := 0.0
+			if d.Minutes > 0 {
+				h = float64(drawHeight) * float64(d.Minutes) / float64(maxMin)
+				if h < 2 {
+					h = 2
+				}
+			}
+			y := float64(padTop+drawHeight) - h
+			fmt.Fprintf(&b,
+				`<rect x="%.2f" y="%.2f" width="%.2f" height="%.2f" class="fill-blue-500/70 dark:fill-blue-400/60"><title>%s: %s</title></rect>`,
+				x, y, barWidth, h, templ.EscapeString(d.Date), fmtMinutes(d.Minutes))
+		}
+
+		step := 1
+		if len(ordered) > 7 {
+			step = (len(ordered) + 6) / 7
+		}
+		for i, d := range ordered {
+			if i%step != 0 && i != len(ordered)-1 {
+				continue
+			}
+			x := float64(padLeft) + float64(i)*(barWidth+barGap) + barWidth/2
+			fmt.Fprintf(&b,
+				`<text x="%.2f" y="%d" text-anchor="middle" class="fill-zinc-500 text-[10px] dark:fill-zinc-400">%s</text>`,
+				x, height-6, templ.EscapeString(d.Label))
+		}
+		b.WriteString(`</svg>`)
+		_, err := io.WriteString(w, b.String())
+		return err
+	})
+}
+
+// fmtMinutes converts a minute count to a compact time string for chart labels.
+func fmtMinutes(m int) string {
+	if m <= 0 {
+		return "0m"
+	}
+	h := m / 60
+	min := m % 60
+	switch {
+	case h == 0:
+		return fmt.Sprintf("%dm", min)
+	case min == 0:
+		return fmt.Sprintf("%dh", h)
+	default:
+		return fmt.Sprintf("%dh %dm", h, min)
+	}
+}
+
 // burndownChartSVG renders the three-band stacked burndown chart matching
 // `task burndown`: Pending (blue, bottom), Started (amber, middle), Done
 // (emerald, top - cumulative within the data window). Bars are oldest-first.

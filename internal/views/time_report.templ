@@ -1,0 +1,110 @@
+package views
+
+import (
+	"fmt"
+	"time"
+)
+
+// TimeReportData is the data model for /reports/time.
+type TimeReportData struct {
+	Days              int               // selected window: 7, 14, 30, or 90
+	TotalMinutes      int               // total tracked time in window
+	SessionCount      int               // number of sessions in window
+	ProjectCount      int               // distinct projects with tracked time in window
+	AvgSessionMinutes int               // TotalMinutes / SessionCount; 0 when no sessions
+	ProjectTotals     []ProjectTimeNode // by-project breakdown; nil when only one project
+	TimeHistory       []TimeDayCount    // daily buckets for the bar chart; reuses stats type
+}
+
+func (d TimeReportData) TotalDuration() string {
+	return fmtMinutes(d.TotalMinutes)
+}
+
+templ TimeReportPage(p Page, enabled bool, data TimeReportData) {
+	@Layout(p) {
+		if !enabled {
+			@timeReportDisabled()
+		} else {
+			@timeReportContent(data)
+		}
+	}
+}
+
+templ timeReportContent(data TimeReportData) {
+	<div class="mb-4 flex flex-wrap items-center justify-between gap-3">
+		<h2 class="text-lg font-medium">Time by project</h2>
+		<div class="inline-flex overflow-hidden rounded border border-zinc-200 bg-white text-sm dark:border-zinc-800 dark:bg-zinc-900">
+			for _, d := range []int{7, 14, 30, 90} {
+				@timeRangeTab(d, data.Days)
+			}
+		</div>
+	</div>
+	<div class="mb-4 grid grid-cols-2 gap-3 sm:grid-cols-3 md:grid-cols-4">
+		<div class="rounded-lg border border-blue-200 bg-blue-50 p-4 text-blue-900 dark:border-blue-900/60 dark:bg-blue-950/40 dark:text-blue-100">
+			<div class="text-2xl font-semibold tabular-nums">{ data.TotalDuration() }</div>
+			<div class="mt-1 text-xs font-medium uppercase tracking-wide opacity-80">Total tracked</div>
+			<div class="mt-1 text-[11px] opacity-70">{ fmt.Sprintf("last %d days", data.Days) }</div>
+		</div>
+		<div class="rounded-lg border border-zinc-200 bg-white p-4 text-zinc-900 dark:border-zinc-800 dark:bg-zinc-900 dark:text-zinc-100">
+			<div class="text-2xl font-semibold tabular-nums">{ fmt.Sprintf("%d", data.SessionCount) }</div>
+			<div class="mt-1 text-xs font-medium uppercase tracking-wide opacity-80">Sessions</div>
+			<div class="mt-1 text-[11px] opacity-70">{ fmt.Sprintf("last %d days", data.Days) }</div>
+		</div>
+		<div class="rounded-lg border border-zinc-200 bg-white p-4 text-zinc-900 dark:border-zinc-800 dark:bg-zinc-900 dark:text-zinc-100">
+			<div class="text-2xl font-semibold tabular-nums">{ fmtMinutes(data.AvgSessionMinutes) }</div>
+			<div class="mt-1 text-xs font-medium uppercase tracking-wide opacity-80">Avg session</div>
+			<div class="mt-1 text-[11px] opacity-70">{ fmt.Sprintf("last %d days", data.Days) }</div>
+		</div>
+		<div class="rounded-lg border border-zinc-200 bg-white p-4 text-zinc-900 dark:border-zinc-800 dark:bg-zinc-900 dark:text-zinc-100">
+			<div class="text-2xl font-semibold tabular-nums">{ fmt.Sprintf("%d", data.ProjectCount) }</div>
+			<div class="mt-1 text-xs font-medium uppercase tracking-wide opacity-80">Projects</div>
+			<div class="mt-1 text-[11px] opacity-70">{ fmt.Sprintf("last %d days", data.Days) }</div>
+		</div>
+	</div>
+	if len(data.TimeHistory) > 0 {
+		<div class="mb-4">
+			<h3 class="mb-2 text-sm font-medium text-zinc-700 dark:text-zinc-300">Daily breakdown</h3>
+			@timeTrackedChart(data.TimeHistory)
+		</div>
+	}
+	if len(data.ProjectTotals) > 0 {
+		<div class="mb-4">
+			<h3 class="mb-2 text-sm font-medium text-zinc-700 dark:text-zinc-300">By project</h3>
+			@projectTimeTree(data.ProjectTotals, timeReportTotal(data.ProjectTotals))
+		</div>
+	} else if data.TotalMinutes == 0 {
+		<div class="flex flex-col items-center justify-center py-20 text-center">
+			<p class="text-sm text-zinc-500 dark:text-zinc-400">No time tracked in the last { fmt.Sprintf("%d", data.Days) } days.</p>
+			<p class="mt-1 text-xs text-zinc-400 dark:text-zinc-500">Use the ▶ button on a task to start tracking.</p>
+		</div>
+	}
+}
+
+templ timeRangeTab(days, selected int) {
+	if days == selected {
+		<span class="bg-zinc-900 px-3 py-1 font-medium text-white dark:bg-zinc-100 dark:text-zinc-900">{ fmt.Sprintf("%dd", days) }</span>
+	} else {
+		<a
+			href={ templ.SafeURL(fmt.Sprintf("/reports/time?days=%d", days)) }
+			class="px-3 py-1 text-zinc-600 hover:bg-zinc-100 dark:text-zinc-300 dark:hover:bg-zinc-800"
+		>{ fmt.Sprintf("%dd", days) }</a>
+	}
+}
+
+templ timeReportDisabled() {
+	<div class="flex flex-col items-center justify-center py-24 text-center">
+		<h3 class="mb-2 text-base font-semibold text-zinc-900 dark:text-zinc-100">Time tracking is disabled</h3>
+		<p class="mb-6 max-w-sm text-sm text-zinc-500 dark:text-zinc-400">
+			Enable <code class="rounded bg-zinc-100 px-1 py-0.5 font-mono text-xs dark:bg-zinc-800">journal.time</code> via the Timesheet page to start recording sessions.
+		</p>
+		<a href="/timesheet" class="rounded bg-blue-600 px-4 py-2 text-sm font-medium text-white shadow-sm hover:bg-blue-700">Go to Timesheet</a>
+	</div>
+}
+
+func timeReportTotal(nodes []ProjectTimeNode) time.Duration {
+	var total time.Duration
+	for _, n := range nodes {
+		total += n.SubtreeTotal
+	}
+	return total
+}

@@ -120,6 +120,7 @@ templ mobileNavDrawer(active string, builtinReports, customReports []string) {
 						@drawerNavLink("/done", "Done", active == "done")
 						@drawerNavLink("/forecast", "Forecast", active == "forecast")
 						@drawerNavLink("/timesheet", "Timesheet", active == "timesheet")
+						@drawerNavLink("/reports/time", "Time by project", active == "time-report")
 					</div>
 				</div>
 				if len(builtinReports) > 0 {
@@ -197,6 +198,7 @@ templ moreMenu(active string, builtinReports, customReports []string) {
 				@moreMenuLink("/done", "Done", active == "done")
 				@moreMenuLink("/forecast", "Forecast", active == "forecast")
 				@moreMenuLink("/timesheet", "Timesheet", active == "timesheet")
+				@moreMenuLink("/reports/time", "Time by project", active == "time-report")
 				if len(builtinReports) > 0 {
 					@moreSectionHeader("Built-in")
 					for _, name := range builtinReports {
@@ -218,7 +220,7 @@ templ moreMenu(active string, builtinReports, customReports []string) {
 // the dropdown matches the current page. This mirrors the navLink active
 // state so users always see "you are inside this menu".
 func moreActive(active string) bool {
-	if active == "forecast" || active == "done" || active == "timesheet" || active == "contexts" {
+	if active == "forecast" || active == "done" || active == "timesheet" || active == "contexts" || active == "time-report" {
 		return true
 	}
 	if len(active) > 2 && active[:2] == "r-" {
