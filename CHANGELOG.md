@@ -1,5 +1,12 @@
 # Changelog
 
+## [1.4.3](https://github.com/furan917/taskwarrior-web-portal/compare/v1.4.2...v1.4.3) (2026-05-16)
+
+
+### Bug Fixes
+
+* Add configurable secure cookies, block a broken sync causing OOM ([1817f32](https://github.com/furan917/taskwarrior-web-portal/commit/1817f328676a790821bfeb2c4bf0b0305e45a370))
+
 ## [1.4.2](https://github.com/furan917/taskwarrior-web-portal/compare/v1.4.1...v1.4.2) (2026-05-16)
 
 
