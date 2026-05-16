@@ -1,5 +1,12 @@
 # Changelog
 
+## [1.3.2](https://github.com/furan917/taskwarrior-web-portal/compare/v1.3.1...v1.3.2) (2026-05-16)
+
+
+### Bug Fixes
+
+* add ability to control allowed hosts and port by ENV ([de31b1a](https://github.com/furan917/taskwarrior-web-portal/commit/de31b1a44188f3b3c1e28529b3a7ea5959f2b05e))
+
 ## [1.3.1](https://github.com/furan917/taskwarrior-web-portal/compare/v1.3.0...v1.3.1) (2026-05-13)
 
 
