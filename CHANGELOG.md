@@ -1,5 +1,12 @@
 # Changelog
 
+## [1.3.3](https://github.com/furan917/taskwarrior-web-portal/compare/v1.3.2...v1.3.3) (2026-05-16)
+
+
+### Bug Fixes
+
+* ensure task data location is checked and not assumed ([9958a3c](https://github.com/furan917/taskwarrior-web-portal/commit/9958a3cfdbec9f44201773d223b526a81e2fe9ea))
+
 ## [1.3.2](https://github.com/furan917/taskwarrior-web-portal/compare/v1.3.1...v1.3.2) (2026-05-16)
 
 
