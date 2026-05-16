@@ -215,6 +215,45 @@ func TestNewRequestID(t *testing.T) {
 	}
 }
 
+func TestHostAllowlist_DisabledCheck_AllowsAnyHost(t *testing.T) {
+	t.Setenv("TWP_DISABLE_HOST_CHECK", "1")
+	h := hostAllowlist(nil, okHandler())
+	for _, host := range []string{"evil.com", "0.0.0.0", "192.168.1.100", "anything"} {
+		req := httptest.NewRequest(http.MethodGet, "/", nil)
+		req.Host = host
+		rr := httptest.NewRecorder()
+		h.ServeHTTP(rr, req)
+		if rr.Code != http.StatusOK {
+			t.Errorf("host %q: got %d want 200 when check disabled", host, rr.Code)
+		}
+	}
+}
+
+func TestOriginAllowlist_DisabledCheck_AllowsPostWithoutOrigin(t *testing.T) {
+	t.Setenv("TWP_DISABLE_HOST_CHECK", "1")
+	h := originAllowlist(nil, okHandler())
+	req := httptest.NewRequest(http.MethodPost, "/", nil)
+	rr := httptest.NewRecorder()
+	h.ServeHTTP(rr, req)
+	if rr.Code != http.StatusOK {
+		t.Errorf("got %d want 200 for POST without Origin when check disabled", rr.Code)
+	}
+}
+
+func TestOriginAllowlist_DisabledCheck_AllowsAnyOrigin(t *testing.T) {
+	t.Setenv("TWP_DISABLE_HOST_CHECK", "1")
+	h := originAllowlist(nil, okHandler())
+	for _, origin := range []string{"http://evil.com", "null", "https://attacker.example"} {
+		req := httptest.NewRequest(http.MethodPost, "/", nil)
+		req.Header.Set("Origin", origin)
+		rr := httptest.NewRecorder()
+		h.ServeHTTP(rr, req)
+		if rr.Code != http.StatusOK {
+			t.Errorf("origin %q: got %d want 200 when check disabled", origin, rr.Code)
+		}
+	}
+}
+
 // contains is a tiny helper to dodge an import.
 func contains(haystack, needle string) bool {
 	for i := 0; i+len(needle) <= len(haystack); i++ {

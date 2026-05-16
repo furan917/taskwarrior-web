@@ -12,7 +12,31 @@ type PortalConfig struct {
 	AllowedHosts []string
 }
 
-templ ConfigInfoPage(p Page, info tw.ConfigInfo, portal PortalConfig) {
+// SyncResult holds the outcome of the most recent `task sync` run.
+type SyncResult struct {
+	Output string
+	OK     bool
+}
+
+templ SyncResultPartial(r *SyncResult) {
+	if r != nil {
+		<div id="sync-result" class={ syncResultClasses(r.OK) }>
+			{ r.Output }
+		</div>
+	} else {
+		<div id="sync-result"></div>
+	}
+}
+
+func syncResultClasses(ok bool) string {
+	base := "mt-2 rounded-md border px-3 py-2 text-sm font-mono whitespace-pre-wrap "
+	if ok {
+		return base + "border-emerald-200 bg-emerald-50 text-emerald-800 dark:border-emerald-800 dark:bg-emerald-950 dark:text-emerald-300"
+	}
+	return base + "border-red-200 bg-red-50 text-red-800 dark:border-red-800 dark:bg-red-950 dark:text-red-300"
+}
+
+templ ConfigInfoPage(p Page, info tw.ConfigInfo, portal PortalConfig, syncResult *SyncResult) {
 	@Layout(p) {
 		<div class="mb-3 flex items-baseline justify-between">
 			<h2 class="text-lg font-medium">Configuration</h2>
@@ -35,6 +59,20 @@ templ ConfigInfoPage(p Page, info tw.ConfigInfo, portal PortalConfig) {
 				@configKVMono("Server URL", configOrDefault(info.SyncServerURL, "Not configured"))
 				@configKVMono("Client ID", configOrDefault(info.SyncClientID, "Not configured"))
 			</div>
+			if info.SyncServerURL != "" {
+				<div class="mt-3">
+					<button
+						hx-post="/sync"
+						hx-target="#sync-result"
+						hx-swap="outerHTML"
+						hx-disabled-elt="this"
+						class="rounded bg-blue-600 px-3 py-1.5 text-sm font-medium text-white hover:bg-blue-700 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:ring-offset-2 dark:focus:ring-offset-zinc-950 disabled:opacity-50 disabled:cursor-not-allowed"
+					>
+						Sync now
+					</button>
+				</div>
+				@SyncResultPartial(syncResult)
+			}
 		</div>
 		<div class="mt-6">
 			<h3 class="mb-2 text-sm font-medium text-zinc-700 dark:text-zinc-300">Hooks</h3>

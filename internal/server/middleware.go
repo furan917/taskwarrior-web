@@ -48,6 +48,10 @@ var allowedOrigins = func() map[string]bool {
 // 421 (Misdirected Request) is the spec-correct status for an unrecognised host.
 func hostAllowlist(logger *slog.Logger, next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if config.DisableHostCheck() {
+			next.ServeHTTP(w, r)
+			return
+		}
 		host := r.Host
 		if h, _, err := net.SplitHostPort(host); err == nil {
 			host = h
@@ -74,6 +78,10 @@ func hostAllowlist(logger *slog.Logger, next http.Handler) http.Handler {
 // as hostAllowlist: the hostname is what matters for CSRF protection.
 func originAllowlist(logger *slog.Logger, next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if config.DisableHostCheck() {
+			next.ServeHTTP(w, r)
+			return
+		}
 		switch r.Method {
 		case http.MethodGet, http.MethodHead, http.MethodOptions:
 			next.ServeHTTP(w, r)

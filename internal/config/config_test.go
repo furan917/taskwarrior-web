@@ -135,3 +135,31 @@ func TestAllowedOrigins_ExtraHosts(t *testing.T) {
 		t.Errorf("missing extra origin in %v", got)
 	}
 }
+
+func TestDisableHostCheck_Default(t *testing.T) {
+	t.Setenv("TWP_DISABLE_HOST_CHECK", "")
+	if config.DisableHostCheck() {
+		t.Error("expected false when unset")
+	}
+}
+
+func TestDisableHostCheck_One(t *testing.T) {
+	t.Setenv("TWP_DISABLE_HOST_CHECK", "1")
+	if !config.DisableHostCheck() {
+		t.Error("expected true for '1'")
+	}
+}
+
+func TestDisableHostCheck_True(t *testing.T) {
+	t.Setenv("TWP_DISABLE_HOST_CHECK", "true")
+	if !config.DisableHostCheck() {
+		t.Error("expected true for 'true'")
+	}
+}
+
+func TestDisableHostCheck_Zero(t *testing.T) {
+	t.Setenv("TWP_DISABLE_HOST_CHECK", "0")
+	if config.DisableHostCheck() {
+		t.Error("expected false for '0'")
+	}
+}

@@ -36,6 +36,7 @@ BIN_DST="$HOME/.local/bin/taskwarrior-web-portal"
 TWP_BIND_HOST="${TWP_BIND_HOST:-}"
 TWP_BIND_PORT="${TWP_BIND_PORT:-}"
 TWP_ALLOWED_HOSTS="${TWP_ALLOWED_HOSTS:-}"
+TWP_DISABLE_HOST_CHECK="${TWP_DISABLE_HOST_CHECK:-}"
 
 # Validate port if set.
 if [[ -n "$TWP_BIND_PORT" ]]; then
@@ -52,9 +53,10 @@ URL="http://127.0.0.1:${_port}"
 
 # Build the list of TWP_* vars to bake in (only those that are non-empty).
 TWP_VARS=()
-[[ -n "$TWP_BIND_HOST"    ]] && TWP_VARS+=("TWP_BIND_HOST=${TWP_BIND_HOST}")
-[[ -n "$TWP_BIND_PORT"    ]] && TWP_VARS+=("TWP_BIND_PORT=${TWP_BIND_PORT}")
-[[ -n "$TWP_ALLOWED_HOSTS" ]] && TWP_VARS+=("TWP_ALLOWED_HOSTS=${TWP_ALLOWED_HOSTS}")
+[[ -n "$TWP_BIND_HOST"          ]] && TWP_VARS+=("TWP_BIND_HOST=${TWP_BIND_HOST}")
+[[ -n "$TWP_BIND_PORT"          ]] && TWP_VARS+=("TWP_BIND_PORT=${TWP_BIND_PORT}")
+[[ -n "$TWP_ALLOWED_HOSTS"      ]] && TWP_VARS+=("TWP_ALLOWED_HOSTS=${TWP_ALLOWED_HOSTS}")
+[[ -n "$TWP_DISABLE_HOST_CHECK" ]] && TWP_VARS+=("TWP_DISABLE_HOST_CHECK=${TWP_DISABLE_HOST_CHECK}")
 
 # Print which vars will be baked so the user can see what's happening.
 if [[ ${#TWP_VARS[@]} -gt 0 ]]; then

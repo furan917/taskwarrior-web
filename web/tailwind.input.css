@@ -3,6 +3,11 @@
 @source "../internal/views/**/*.templ";
 @source "../internal/views/**/*_templ.go";
 
+/* HTMX indicator: hidden by default, visible during in-flight requests */
+.htmx-indicator { opacity: 0; transition: opacity 200ms ease-in; }
+.htmx-request .htmx-indicator,
+.htmx-indicator.htmx-request { opacity: 1; }
+
 /*
  * Dark mode is opt-in via an explicit `.dark` class on <html>. We do NOT use
  * Tailwind v4's default `prefers-color-scheme` because the in-app toggle in

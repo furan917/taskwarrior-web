@@ -601,14 +601,16 @@ func csrfToken(r *http.Request) string { return CSRFToken(r.Context()) }
 
 // ConfigInfo renders the read-only /config page showing non-sensitive
 // Taskwarrior and portal configuration values.
-func (v *Views) ConfigInfo(w http.ResponseWriter, r *http.Request) {
-	info := v.TW.GetConfigInfo(r.Context())
-	portal := views.PortalConfig{
-		BindAddr:     config.Addr(),
-		AllowedHosts: config.AllowedHosts(),
+func (v *Views) ConfigInfo(s *Sync) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		info := v.TW.GetConfigInfo(r.Context())
+		portal := views.PortalConfig{
+			BindAddr:     config.Addr(),
+			AllowedHosts: config.AllowedHosts(),
+		}
+		page := v.buildPage(r, "Configuration", "config", false)
+		renderHTML(w, r, "Config", views.ConfigInfoPage(page, info, portal, s.Result()), v.Logger)
 	}
-	page := v.buildPage(r, "Configuration", "config", false)
-	renderHTML(w, r, "Config", views.ConfigInfoPage(page, info, portal), v.Logger)
 }
 
 // Done shows recently completed tasks. Default window: last 14 days; the

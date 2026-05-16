@@ -35,6 +35,10 @@ type fakeTaskOpts struct {
 	Contexts   []fakeContext
 	RecordArgv bool
 	ExitCode   int
+	// SyncOutput is the text printed by `task sync`. SyncExitCode controls
+	// whether the sync command succeeds (0) or fails.
+	SyncOutput   string
+	SyncExitCode int
 }
 
 type fakeContext struct {
@@ -123,6 +127,9 @@ done
 			b.WriteString(`  *"_get rc.uda.` + u.Name + `.type"*) printf '` + u.Type + `'; exit 0;;` + "\n")
 			b.WriteString(`  *"_get rc.uda.` + u.Name + `.label"*) printf '` + u.Label + `'; exit 0;;` + "\n")
 		}
+	}
+	if opts.SyncOutput != "" || opts.SyncExitCode != 0 {
+		b.WriteString(`  *"sync"*) printf '` + opts.SyncOutput + `'; exit ` + itoa(opts.SyncExitCode) + `;;` + "\n")
 	}
 	b.WriteString("esac\n")
 

@@ -117,6 +117,19 @@ func AllowedOrigins() []string {
 	return origins
 }
 
+// DisableHostCheck reports whether TWP_DISABLE_HOST_CHECK is set to a truthy
+// value (1, true, yes). When true, the Host and Origin allowlist middleware
+// passes all requests without checking. Intended for Docker deployments where
+// the external port or hostname is not known at startup.
+func DisableHostCheck() bool {
+	v := os.Getenv("TWP_DISABLE_HOST_CHECK")
+	if v == "" {
+		return false
+	}
+	b, _ := strconv.ParseBool(v)
+	return b
+}
+
 // Validate checks all env var overrides for correctness and returns a combined
 // error if any are invalid. Call this early in main before starting the server.
 func Validate() error {

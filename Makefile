@@ -9,6 +9,7 @@ TEMPL_GO_FILES := $(TEMPL_FILES:.templ=_templ.go)
 TAILWIND       := ./scripts/tailwindcss
 TAILWIND_IN    := web/tailwind.input.css
 TAILWIND_OUT   := web/static/app.css
+TAILWIND_URL   := https://github.com/tailwindlabs/tailwindcss/releases/latest/download/tailwindcss-linux-x64
 
 BIN            := bin/taskwarrior-web-portal
 
@@ -17,7 +18,15 @@ BIN            := bin/taskwarrior-web-portal
 $(TEMPL_GO_FILES) &: $(TEMPL_FILES)
 	templ generate
 
-$(TAILWIND_OUT): $(TAILWIND_IN) $(TEMPL_FILES) $(TEMPL_GO_FILES)
+# Download the standalone Tailwind binary if missing. Gitignored; architecture
+# is hard-coded to linux-x64 matching the dev environment. CI fetches its own
+# copy via the build workflow so this target is only needed locally.
+$(TAILWIND):
+	@echo "Downloading tailwindcss binary..."
+	curl -fsSL -o $(TAILWIND) $(TAILWIND_URL)
+	chmod +x $(TAILWIND)
+
+$(TAILWIND_OUT): $(TAILWIND) $(TAILWIND_IN) $(TEMPL_FILES) $(TEMPL_GO_FILES)
 	@mkdir -p $(@D)
 	$(TAILWIND) -i $(TAILWIND_IN) -o $(TAILWIND_OUT) --minify
 
@@ -27,7 +36,9 @@ $(BIN): $(GO_FILES) $(TEMPL_GO_FILES) $(STATIC_FILES)
 	@mkdir -p $(@D)
 	go build -ldflags="-s -w" -o $(BIN) .
 
-.PHONY: generate css build run test fmt clean check dev install uninstall
+.PHONY: generate css css-setup build run test fmt clean check dev install uninstall
+
+css-setup: $(TAILWIND)
 
 generate: $(TEMPL_GO_FILES)
 css: $(TAILWIND_OUT)
