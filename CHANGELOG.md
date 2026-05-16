@@ -1,5 +1,12 @@
 # Changelog
 
+## [1.3.4](https://github.com/furan917/taskwarrior-web-portal/compare/v1.3.3...v1.3.4) (2026-05-16)
+
+
+### Bug Fixes
+
+* remove port check from hostname validation ([77ef90f](https://github.com/furan917/taskwarrior-web-portal/commit/77ef90f24e50f77f7ef6f9aab1aadf3213538fc4))
+
 ## [1.3.3](https://github.com/furan917/taskwarrior-web-portal/compare/v1.3.2...v1.3.3) (2026-05-16)
 
 
