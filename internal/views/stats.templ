@@ -23,8 +23,8 @@ type Stats struct {
 	MonthlyHistory      []MonthCount  // newest-first; up to 12 months of added/completed counts.
 	BurndownDaily       []BurndownBar // oldest-first; 30 daily snapshots of pending count.
 	BurndownWeekly      []BurndownBar // oldest-first; 13 weekly snapshots of pending count.
-	NetFixRate          float64       // tasks/day cleared since peak; 0 if no convergence.
-	EstimatedCompletion string        // "YYYY-MM-DD (Xmo)" or "" if no convergence.
+	NetFixRate          float64 // tasks/day cleared since peak; 0 if no convergence.
+	EstimatedCompletion string  // "YYYY-MM-DD (Xmo)" or "" if no convergence.
 }
 
 // DayCount pairs a day label with how many tasks completed on that day.

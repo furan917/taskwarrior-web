@@ -277,9 +277,17 @@ templ sessionsTrigger(t tw.Task) {
 // time" / "time entry" is the standard vocabulary across other tools
 // (Toggl, Clockify, Harvest).
 func sessionsTriggerLabel(t tw.Task) string {
-	n := len(tw.ParseSessions(t, time.Now()))
-	if n == 0 {
+	now := time.Now()
+	sessions := tw.ParseSessions(t, now)
+	if len(sessions) == 0 {
 		return "Add time entry"
 	}
-	return fmt.Sprintf("Tracked time (%d)", n)
+	var total time.Duration
+	for _, s := range sessions {
+		total += s.Duration(now)
+	}
+	if total == 0 {
+		return fmt.Sprintf("Tracked time (%d)", len(sessions))
+	}
+	return fmt.Sprintf("Tracked time · %s", formatElapsed(total))
 }

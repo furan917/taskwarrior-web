@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"net/http"
 	"sort"
+	"strings"
 	"time"
 
 	"github.com/furan917/taskwarrior-web-portal/internal/tw"
@@ -81,7 +82,99 @@ func BuildTimesheetPage(view string, anchor time.Time, sessions []tw.Session, no
 	for _, d := range data.Days {
 		data.TotalDuration += d.Total
 	}
+	data.ProjectTotals = buildProjectTimeTree(sessions, now)
 	return data
+}
+
+// buildProjectTimeTree aggregates sessions by project and builds a collapsed
+// dot-notation tree. Returns nil when all sessions share a single project (no
+// breakdown to show). The tree mirrors Browse's ProjectTreeNode structure but
+// carries time.Duration instead of task counts.
+func buildProjectTimeTree(sessions []tw.Session, now time.Time) []views.ProjectTimeNode {
+	type accum struct {
+		total time.Duration
+	}
+	flat := map[string]*accum{}
+	for _, s := range sessions {
+		key := s.Project
+		if flat[key] == nil {
+			flat[key] = &accum{}
+		}
+		flat[key].total += s.Duration(now)
+	}
+	if len(flat) <= 1 {
+		return nil
+	}
+
+	nodeMap := map[string]*views.ProjectTimeNode{}
+	for proj, a := range flat {
+		name := strings.Trim(proj, ".")
+		if name == "" {
+			nodeMap[""] = &views.ProjectTimeNode{
+				Segment:      "(no project)",
+				FullName:     "",
+				SelfTotal:    a.total,
+				SubtreeTotal: a.total,
+			}
+			continue
+		}
+		segments := strings.Split(name, ".")
+		for i, seg := range segments {
+			full := strings.Join(segments[:i+1], ".")
+			if nodeMap[full] == nil {
+				nodeMap[full] = &views.ProjectTimeNode{Segment: seg, FullName: full}
+			}
+			if i == len(segments)-1 {
+				nodeMap[full].SelfTotal = a.total
+			}
+		}
+	}
+
+	ptrChildren := map[string][]*views.ProjectTimeNode{}
+	var rootPtrs []*views.ProjectTimeNode
+	for full, node := range nodeMap {
+		if full == "" {
+			rootPtrs = append(rootPtrs, node)
+			continue
+		}
+		dot := strings.LastIndex(full, ".")
+		if dot == -1 {
+			rootPtrs = append(rootPtrs, node)
+		} else {
+			parent := full[:dot]
+			ptrChildren[parent] = append(ptrChildren[parent], node)
+		}
+	}
+
+	var buildNode func(full string) views.ProjectTimeNode
+	buildNode = func(full string) views.ProjectTimeNode {
+		node := *nodeMap[full]
+		node.Children = nil
+		for _, childPtr := range ptrChildren[full] {
+			node.Children = append(node.Children, buildNode(childPtr.FullName))
+		}
+		node.SubtreeTotal = node.SelfTotal
+		for _, c := range node.Children {
+			node.SubtreeTotal += c.SubtreeTotal
+		}
+		sort.Slice(node.Children, func(i, j int) bool {
+			return node.Children[i].SubtreeTotal > node.Children[j].SubtreeTotal
+		})
+		return node
+	}
+
+	result := make([]views.ProjectTimeNode, 0, len(rootPtrs))
+	for _, r := range rootPtrs {
+		if r.FullName == "" {
+			result = append(result, *r)
+		} else {
+			result = append(result, buildNode(r.FullName))
+		}
+	}
+	sort.Slice(result, func(i, j int) bool {
+		return result[i].SubtreeTotal > result[j].SubtreeTotal
+	})
+	return result
 }
 
 // timesheetWindow returns the [from, to) fetch window for a given view and anchor.

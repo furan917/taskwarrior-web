@@ -19,13 +19,25 @@ type TimesheetDay struct {
 	IsToday  bool
 }
 
+// ProjectTimeNode is one node in a dot-notation project hierarchy built from
+// session data. Mirrors ProjectTreeNode from project_tree.go but carries
+// time.Duration totals rather than task counts.
+type ProjectTimeNode struct {
+	Segment       string          // last dot-segment
+	FullName      string          // full dot-joined path; empty for the "(no project)" bucket
+	SubtreeTotal  time.Duration   // self + all descendants
+	SelfTotal     time.Duration   // sessions attributed to exactly this project name
+	Children      []ProjectTimeNode
+}
+
 // TimesheetData is the full data set passed to the timesheet page.
 type TimesheetData struct {
 	Days          []TimesheetDay
 	TotalDuration time.Duration
-	View          string    // TimesheetViewWeek / TimesheetViewDay
-	Anchor        time.Time // the date the user navigated to
-	Title         string    // "5 May – 11 May 2026" / "Mon 5 May 2026"
+	ProjectTotals []ProjectTimeNode // tree of project totals; nil when only one project
+	View          string            // TimesheetViewWeek / TimesheetViewDay
+	Anchor        time.Time         // the date the user navigated to
+	Title         string            // "5 May – 11 May 2026" / "Mon 5 May 2026"
 	PrevURL       string
 	NextURL       string
 	TodayURL      string
@@ -50,6 +62,9 @@ templ timesheetContent(data TimesheetData) {
 		@navArrow(data.NextURL, "→", "Next")
 		@navArrow(data.TodayURL, "Today", "Today")
 		<h2 class="ml-2 text-lg font-medium">{ data.Title }</h2>
+		if data.TotalDuration > 0 {
+			<span class="text-sm font-medium tabular-nums text-zinc-500 dark:text-zinc-400">{ formatElapsed(data.TotalDuration) }</span>
+		}
 		<div class="ml-auto inline-flex overflow-hidden rounded border border-zinc-200 bg-white text-sm dark:border-zinc-800 dark:bg-zinc-900">
 			@timesheetSwitchLink(data, TimesheetViewWeek, "Week")
 			@timesheetSwitchLink(data, TimesheetViewDay, "Day")
@@ -60,6 +75,12 @@ templ timesheetContent(data TimesheetData) {
 			@timesheetDayContent(data)
 		default:
 			@timesheetWeekContent(data)
+	}
+	if len(data.ProjectTotals) > 0 {
+		<div class="mt-4">
+			<h3 class="mb-2 text-sm font-medium text-zinc-700 dark:text-zinc-300">Time by project</h3>
+			@projectTimeTree(data.ProjectTotals, data.TotalDuration)
+		</div>
 	}
 }
 
@@ -210,6 +231,56 @@ func sessionsEditURL(s tw.Session) string {
 	return "/forms/sessions/" + s.TaskUUID +
 		"?day=" + s.Start.Local().Format("2006-01-02") +
 		"&from=timesheet"
+}
+
+templ projectTimeTree(nodes []ProjectTimeNode, grandTotal time.Duration) {
+	<div class="rounded-lg border border-zinc-200 bg-white dark:border-zinc-800 dark:bg-zinc-900">
+		<ul class="divide-y divide-zinc-200 dark:divide-zinc-800">
+			for _, node := range nodes {
+				@projectTimeNode(node, 0)
+			}
+		</ul>
+		if grandTotal > 0 {
+			<div class="flex items-center justify-between border-t border-zinc-200 px-3 py-2 dark:border-zinc-800">
+				<span class="text-xs font-semibold uppercase tracking-wide text-zinc-500 dark:text-zinc-400">Total</span>
+				<span class="text-sm font-semibold tabular-nums text-zinc-700 dark:text-zinc-300">{ formatElapsed(grandTotal) }</span>
+			</div>
+		}
+	</div>
+}
+
+templ projectTimeNode(node ProjectTimeNode, depth int) {
+	if len(node.Children) == 0 {
+		<li>
+			<div class={ "flex items-center justify-between px-3 py-2 text-sm hover:bg-zinc-50 dark:hover:bg-zinc-800/50 " + depthPaddingClass(depth) }>
+				if node.FullName == "" {
+					<span class="italic text-zinc-400 dark:text-zinc-500">no project</span>
+				} else {
+					<span class="text-zinc-800 dark:text-zinc-200">{ node.FullName }</span>
+				}
+				<span class="ml-2 font-medium tabular-nums text-zinc-600 dark:text-zinc-300">{ formatElapsed(node.SubtreeTotal) }</span>
+			</div>
+		</li>
+	} else {
+		<li>
+			<details open?={ depth < defaultOpenDepth } class="group">
+				<summary class={ "flex cursor-pointer list-none items-center justify-between px-3 py-2 text-sm hover:bg-zinc-50 [&::-webkit-details-marker]:hidden dark:hover:bg-zinc-800/50 " + depthPaddingClass(depth) }>
+					<span class="flex items-center gap-1.5">
+						<svg class="h-3 w-3 shrink-0 text-zinc-400 transition-transform group-open:rotate-90 dark:text-zinc-500" viewBox="0 0 20 20" fill="currentColor" aria-hidden="true">
+							<path fill-rule="evenodd" d="M7.21 14.77a.75.75 0 01.02-1.06L11.168 10 7.23 6.29a.75.75 0 111.04-1.08l4.5 4.25a.75.75 0 010 1.08l-4.5 4.25a.75.75 0 01-1.06-.02z" clip-rule="evenodd"></path>
+						</svg>
+						<span class="font-medium text-zinc-800 dark:text-zinc-200">{ node.FullName }</span>
+					</span>
+					<span class="ml-2 font-medium tabular-nums text-zinc-600 dark:text-zinc-300">{ formatElapsed(node.SubtreeTotal) }</span>
+				</summary>
+				<ul class="border-t border-zinc-100 dark:border-zinc-800">
+					for _, child := range node.Children {
+						@projectTimeNode(child, depth+1)
+					}
+				</ul>
+			</details>
+		</li>
+	}
 }
 
 templ timesheetEmpty() {
