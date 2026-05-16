@@ -9,7 +9,7 @@ import (
 )
 
 // ConfigInfo holds non-sensitive Taskwarrior configuration values for the
-// read-only /config page. Sensitive keys (sync.server.encryption_secret,
+// read-only /config page. Sensitive keys (sync.encryption_secret,
 // sync.local_secret) are intentionally omitted and never fetched.
 type ConfigInfo struct {
 	Version       string   // `task --version`
