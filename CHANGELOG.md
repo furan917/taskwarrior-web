@@ -1,5 +1,12 @@
 # Changelog
 
+## [1.4.4](https://github.com/furan917/taskwarrior-web-portal/compare/v1.4.3...v1.4.4) (2026-05-16)
+
+
+### Bug Fixes
+
+* handle context write filter properly to not propegate TW issues with and/or ([3a7e4fc](https://github.com/furan917/taskwarrior-web-portal/commit/3a7e4fc7dc585ef50fa0a0b7ca23c4bbb91b3592))
+
 ## [1.4.3](https://github.com/furan917/taskwarrior-web-portal/compare/v1.4.2...v1.4.3) (2026-05-16)
 
 
