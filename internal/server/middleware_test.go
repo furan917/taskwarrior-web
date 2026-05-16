@@ -17,7 +17,8 @@ func okHandler() http.Handler {
 
 func TestHostAllowlist_AllowsKnownHosts(t *testing.T) {
 	h := hostAllowlist(nil, okHandler())
-	for _, host := range []string{"localhost:5050", "127.0.0.1:5050", "localhost", "127.0.0.1"} {
+	// Any port on an allowed hostname must pass — port is not part of the check.
+	for _, host := range []string{"localhost", "localhost:5050", "localhost:5051", "localhost:9999", "127.0.0.1", "127.0.0.1:5050", "127.0.0.1:9999"} {
 		req := httptest.NewRequest(http.MethodGet, "/", nil)
 		req.Host = host
 		rr := httptest.NewRecorder()
@@ -30,7 +31,9 @@ func TestHostAllowlist_AllowsKnownHosts(t *testing.T) {
 
 func TestHostAllowlist_Rejects421(t *testing.T) {
 	h := hostAllowlist(nil, okHandler())
-	for _, host := range []string{"evil.com", "evil.com:5050", "127.0.0.1:5051", "0.0.0.0:5050"} {
+	// Only hostname matters — any unrecognised hostname must be rejected
+	// regardless of port.
+	for _, host := range []string{"evil.com", "evil.com:5050", "0.0.0.0", "0.0.0.0:5050"} {
 		req := httptest.NewRequest(http.MethodGet, "/", nil)
 		req.Host = host
 		rr := httptest.NewRecorder()
@@ -64,7 +67,9 @@ func TestOriginAllowlist_RejectsPostMissingOrigin(t *testing.T) {
 func TestOriginAllowlist_RejectsBadOriginOnWrites(t *testing.T) {
 	h := originAllowlist(nil, okHandler())
 	for _, method := range []string{http.MethodPost, http.MethodPut, http.MethodPatch, http.MethodDelete} {
-		for _, origin := range []string{"http://evil.com", "https://localhost:5050", "http://localhost:5051", "null"} {
+		// Wrong hostname is rejected regardless of port. Wrong scheme (https vs http)
+		// is also rejected. Port alone does not determine rejection.
+		for _, origin := range []string{"http://evil.com", "https://localhost:5050", "https://localhost", "null"} {
 			req := httptest.NewRequest(method, "/", nil)
 			req.Header.Set("Origin", origin)
 			rr := httptest.NewRecorder()
@@ -78,7 +83,8 @@ func TestOriginAllowlist_RejectsBadOriginOnWrites(t *testing.T) {
 
 func TestOriginAllowlist_AcceptsAllowedOrigin(t *testing.T) {
 	h := originAllowlist(nil, okHandler())
-	for _, origin := range []string{"http://localhost:5050", "http://127.0.0.1:5050"} {
+	// Any port on an allowed hostname+scheme must pass.
+	for _, origin := range []string{"http://localhost:5050", "http://localhost:5051", "http://localhost:9999", "http://127.0.0.1:5050", "http://127.0.0.1:9999"} {
 		req := httptest.NewRequest(http.MethodPost, "/", nil)
 		req.Header.Set("Origin", origin)
 		rr := httptest.NewRecorder()

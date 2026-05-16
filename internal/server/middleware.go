@@ -4,40 +4,55 @@ import (
 	"crypto/rand"
 	"encoding/hex"
 	"log/slog"
+	"net"
 	"net/http"
+	"net/url"
 	"time"
 
 	"github.com/furan917/taskwarrior-web-portal/internal/config"
 )
 
-// allowedHosts is built from config.AllowedHosts() at init. Extended by TWP_ALLOWED_HOSTS.
+// allowedHosts contains bare hostnames (no port). Port is intentionally not
+// checked: DNS-rebinding protection comes from verifying the hostname, not the
+// port. Stripping the port also means Docker port mappings (where the external
+// port differs from the container-internal bind port) work transparently.
 var allowedHosts = func() map[string]bool {
-	out := map[string]bool{
-		// Some clients omit the port for default-port URLs; safe to allow
-		// the bare host since the listener only binds 127.0.0.1 anyway.
-		"localhost": true,
-		"127.0.0.1": true,
-	}
+	out := map[string]bool{}
 	for _, h := range config.AllowedHosts() {
-		out[h] = true
+		if host, _, err := net.SplitHostPort(h); err == nil {
+			out[host] = true
+		} else {
+			out[h] = true
+		}
 	}
 	return out
 }()
 
-// allowedOrigins mirrors allowedHosts with http:// prefix. Extended by TWP_ALLOWED_HOSTS.
+// allowedOrigins contains scheme+host without port, mirroring allowedHosts.
 var allowedOrigins = func() map[string]bool {
 	out := map[string]bool{}
 	for _, o := range config.AllowedOrigins() {
-		out[o] = true
+		if u, err := url.Parse(o); err == nil {
+			out[u.Scheme+"://"+u.Hostname()] = true
+		} else {
+			out[o] = true
+		}
 	}
 	return out
 }()
 
-// hostAllowlist gates ALL requests on Host header. 421 (Misdirected Request)
-// is the spec-correct status for "this host doesn't serve here".
+// hostAllowlist gates ALL requests on the hostname in the Host header.
+// The port is stripped before the check — DNS-rebinding protection relies on
+// the hostname, not the port, so stripping port is correct and also means
+// Docker port mappings (external port ≠ container port) work transparently.
+// 421 (Misdirected Request) is the spec-correct status for an unrecognised host.
 func hostAllowlist(logger *slog.Logger, next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if !allowedHosts[r.Host] {
+		host := r.Host
+		if h, _, err := net.SplitHostPort(host); err == nil {
+			host = h
+		}
+		if !allowedHosts[host] {
 			if logger != nil {
 				logger.Warn("host rejected",
 					"middleware", "hostAllowlist",
@@ -55,6 +70,8 @@ func hostAllowlist(logger *slog.Logger, next http.Handler) http.Handler {
 
 // originAllowlist applies only to state-changing methods. GETs are not
 // origin-checked (browsers send Origin only on writes/CORS).
+// Port is stripped from the Origin header before checking, for the same reason
+// as hostAllowlist: the hostname is what matters for CSRF protection.
 func originAllowlist(logger *slog.Logger, next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		switch r.Method {
@@ -62,8 +79,8 @@ func originAllowlist(logger *slog.Logger, next http.Handler) http.Handler {
 			next.ServeHTTP(w, r)
 			return
 		}
-		origin := r.Header.Get("Origin")
-		if origin == "" {
+		rawOrigin := r.Header.Get("Origin")
+		if rawOrigin == "" {
 			// Origin should be present on cross-origin POSTs from browsers.
 			// Same-origin XHR/HTMX from our own page also sets it. Reject if
 			// missing (legitimate browser writes always include it in 2026).
@@ -78,6 +95,12 @@ func originAllowlist(logger *slog.Logger, next http.Handler) http.Handler {
 			http.Error(w, "missing origin", http.StatusForbidden)
 			return
 		}
+		// Strip port from Origin before checking — scheme://host is sufficient
+		// for CSRF protection, and the port may differ under Docker port mapping.
+		origin := rawOrigin
+		if u, err := url.Parse(rawOrigin); err == nil {
+			origin = u.Scheme + "://" + u.Hostname()
+		}
 		if !allowedOrigins[origin] {
 			if logger != nil {
 				logger.Warn("origin rejected",
@@ -85,7 +108,7 @@ func originAllowlist(logger *slog.Logger, next http.Handler) http.Handler {
 					"method", r.Method,
 					"path", r.URL.Path,
 					"remote", r.RemoteAddr,
-					"origin", origin)
+					"origin", rawOrigin)
 			}
 			http.Error(w, "origin not allowed", http.StatusForbidden)
 			return
