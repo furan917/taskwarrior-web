@@ -16,13 +16,13 @@ type Stats struct {
 	Active              int
 	Recurring           int
 	Blocked             int
-	WindowDays          int           // size of the "in window" period the chart + counts cover
-	Completed7d         int           // always last 7 days, regardless of window
-	CompletedInWindow   int           // last WindowDays days
-	History             []DayCount    // newest-first (today at History[0]); one entry per day in WindowDays. completionChartSVG reverses to oldest-first for left-to-right rendering.
-	MonthlyHistory      []MonthCount  // newest-first; up to 12 months of added/completed counts.
-	BurndownDaily       []BurndownBar // oldest-first; 30 daily snapshots of pending count.
-	BurndownWeekly      []BurndownBar // oldest-first; 13 weekly snapshots of pending count.
+	WindowDays          int            // size of the "in window" period the chart + counts cover
+	Completed7d         int            // always last 7 days, regardless of window
+	CompletedInWindow   int            // last WindowDays days
+	History             []DayCount     // newest-first (today at History[0]); one entry per day in WindowDays. completionChartSVG reverses to oldest-first for left-to-right rendering.
+	MonthlyHistory      []MonthCount   // newest-first; up to 12 months of added/completed counts.
+	BurndownDaily       []BurndownBar  // oldest-first; 30 daily snapshots of pending count.
+	BurndownWeekly      []BurndownBar  // oldest-first; 13 weekly snapshots of pending count.
 	NetFixRate          float64        // tasks/day cleared since peak; 0 if no convergence.
 	EstimatedCompletion string         // "YYYY-MM-DD (Xmo)" or "" if no convergence.
 	TimeHistory         []TimeDayCount // newest-first; last 30 days of tracked time; nil if journal.time disabled or no data

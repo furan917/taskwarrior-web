@@ -12,10 +12,10 @@ import (
 // helper already defined in timesheet_test.go.
 func projectSession(start time.Time, dur time.Duration, uuid, proj string) tw.Session {
 	return tw.Session{
-		TaskUUID:  uuid,
-		Project:   proj,
-		Start:     start,
-		Stop:      start.Add(dur),
+		TaskUUID: uuid,
+		Project:  proj,
+		Start:    start,
+		Stop:     start.Add(dur),
 	}
 }
 

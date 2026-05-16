@@ -23,18 +23,18 @@ type TimesheetDay struct {
 // session data. Mirrors ProjectTreeNode from project_tree.go but carries
 // time.Duration totals rather than task counts.
 type ProjectTimeNode struct {
-	Segment       string          // last dot-segment
-	FullName      string          // full dot-joined path; empty for the "(no project)" bucket
-	SubtreeTotal  time.Duration   // self + all descendants
-	SelfTotal     time.Duration   // sessions attributed to exactly this project name
-	Children      []ProjectTimeNode
+	Segment      string        // last dot-segment
+	FullName     string        // full dot-joined path; empty for the "(no project)" bucket
+	SubtreeTotal time.Duration // self + all descendants
+	SelfTotal    time.Duration // sessions attributed to exactly this project name
+	Children     []ProjectTimeNode
 }
 
 // WeekTotal is one row in the recent-weeks summary: a week's total tracked time
 // with a link to navigate to it.
 type WeekTotal struct {
-	Label         string        // "11-17 May 2026"
-	URL           string        // "/timesheet?view=week&date=2026-05-11"
+	Label         string // "11-17 May 2026"
+	URL           string // "/timesheet?view=week&date=2026-05-11"
 	Total         time.Duration
 	IsCurrentWeek bool
 }
