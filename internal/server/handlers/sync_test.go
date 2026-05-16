@@ -41,8 +41,11 @@ func TestSync_Run_Success(t *testing.T) {
 	if !res.OK {
 		t.Errorf("Result.OK false after successful sync")
 	}
-	if res.Output != "Sync complete." {
-		t.Errorf("Result.Output: got %q want %q", res.Output, "Sync complete.")
+	if !strings.Contains(res.Output, "Sync complete.") {
+		t.Errorf("Result.Output missing sync output: %q", res.Output)
+	}
+	if !strings.Contains(res.Output, "UTC") {
+		t.Errorf("Result.Output missing timestamp: %q", res.Output)
 	}
 }
 
@@ -75,7 +78,7 @@ func TestSync_Run_OverwritesPreviousResult(t *testing.T) {
 
 	req := httptest.NewRequest(http.MethodPost, "/sync", nil)
 	s.Run(httptest.NewRecorder(), req)
-	if s.Result().Output != "first" {
+	if !strings.Contains(s.Result().Output, "first") {
 		t.Fatalf("first sync output wrong: %s", s.Result().Output)
 	}
 
@@ -83,7 +86,7 @@ func TestSync_Run_OverwritesPreviousResult(t *testing.T) {
 	installFakeTaskWith(t, fakeTaskOpts{SyncOutput: "second", SyncExitCode: 0})
 	req2 := httptest.NewRequest(http.MethodPost, "/sync", nil)
 	s.Run(httptest.NewRecorder(), req2)
-	if s.Result().Output != "second" {
-		t.Errorf("result not overwritten: got %q want %q", s.Result().Output, "second")
+	if !strings.Contains(s.Result().Output, "second") {
+		t.Errorf("result not overwritten: got %q", s.Result().Output)
 	}
 }
