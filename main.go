@@ -162,6 +162,13 @@ func main() {
 		os.Exit(1)
 	}
 
+	if config.DisableHostCheck() {
+		host := config.BindHost()
+		if host != "127.0.0.1" && host != "localhost" && host != "::1" {
+			logger.Warn("TWP_DISABLE_HOST_CHECK=1 and server is not bound to loopback — host/origin allowlist is disabled; ensure a trusted reverse proxy enforces access control")
+		}
+	}
+
 	srv, err := server.New(server.Config{Logger: logger, Static: staticFS()})
 	if err != nil {
 		if errors.Is(err, syscall.EADDRINUSE) {

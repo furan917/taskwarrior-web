@@ -136,6 +136,34 @@ func TestAllowedOrigins_ExtraHosts(t *testing.T) {
 	}
 }
 
+func TestSecureCookies_Default(t *testing.T) {
+	t.Setenv("TWP_SECURE_COOKIES", "")
+	if config.SecureCookies() {
+		t.Error("expected false when unset")
+	}
+}
+
+func TestSecureCookies_One(t *testing.T) {
+	t.Setenv("TWP_SECURE_COOKIES", "1")
+	if !config.SecureCookies() {
+		t.Error("expected true for '1'")
+	}
+}
+
+func TestSecureCookies_True(t *testing.T) {
+	t.Setenv("TWP_SECURE_COOKIES", "true")
+	if !config.SecureCookies() {
+		t.Error("expected true for 'true'")
+	}
+}
+
+func TestSecureCookies_Zero(t *testing.T) {
+	t.Setenv("TWP_SECURE_COOKIES", "0")
+	if config.SecureCookies() {
+		t.Error("expected false for '0'")
+	}
+}
+
 func TestDisableHostCheck_Default(t *testing.T) {
 	t.Setenv("TWP_DISABLE_HOST_CHECK", "")
 	if config.DisableHostCheck() {

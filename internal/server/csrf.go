@@ -7,6 +7,7 @@ import (
 	"log/slog"
 	"net/http"
 
+	"github.com/furan917/taskwarrior-web-portal/internal/config"
 	"github.com/furan917/taskwarrior-web-portal/internal/server/handlers"
 )
 
@@ -69,7 +70,7 @@ func readOrSetToken(w http.ResponseWriter, r *http.Request) string {
 		Path:     "/",
 		HttpOnly: true,
 		SameSite: http.SameSiteStrictMode,
-		Secure:   false, // localhost http; flip when TLS is added
+		Secure:   config.SecureCookies(),
 	})
 	return token
 }

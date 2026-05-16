@@ -29,6 +29,7 @@ type Tasks struct {
 }
 
 func (t *Tasks) Create(w http.ResponseWriter, r *http.Request) {
+	r.Body = http.MaxBytesReader(w, r.Body, 64<<10)
 	if err := r.ParseForm(); err != nil {
 		http.Error(w, "bad form", http.StatusBadRequest)
 		return
@@ -62,6 +63,7 @@ func (t *Tasks) Modify(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "invalid id", http.StatusBadRequest)
 		return
 	}
+	r.Body = http.MaxBytesReader(w, r.Body, 64<<10)
 	if err := r.ParseForm(); err != nil {
 		http.Error(w, "bad form", http.StatusBadRequest)
 		return
@@ -587,6 +589,7 @@ func (t *Tasks) annotateOrDenotate(w http.ResponseWriter, r *http.Request, annot
 		http.Error(w, "invalid id", http.StatusBadRequest)
 		return
 	}
+	r.Body = http.MaxBytesReader(w, r.Body, 64<<10)
 	if err := r.ParseForm(); err != nil {
 		http.Error(w, "bad form", http.StatusBadRequest)
 		return
@@ -634,6 +637,7 @@ func (t *Tasks) BulkDelete(w http.ResponseWriter, r *http.Request) {
 }
 
 func (t *Tasks) bulk(w http.ResponseWriter, r *http.Request, action string) {
+	r.Body = http.MaxBytesReader(w, r.Body, 64<<10)
 	if err := r.ParseForm(); err != nil {
 		http.Error(w, "bad form", http.StatusBadRequest)
 		return

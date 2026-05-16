@@ -37,6 +37,7 @@ TWP_BIND_HOST="${TWP_BIND_HOST:-}"
 TWP_BIND_PORT="${TWP_BIND_PORT:-}"
 TWP_ALLOWED_HOSTS="${TWP_ALLOWED_HOSTS:-}"
 TWP_DISABLE_HOST_CHECK="${TWP_DISABLE_HOST_CHECK:-}"
+TWP_SECURE_COOKIES="${TWP_SECURE_COOKIES:-}"
 
 # Validate port if set.
 if [[ -n "$TWP_BIND_PORT" ]]; then
@@ -57,6 +58,7 @@ TWP_VARS=()
 [[ -n "$TWP_BIND_PORT"          ]] && TWP_VARS+=("TWP_BIND_PORT=${TWP_BIND_PORT}")
 [[ -n "$TWP_ALLOWED_HOSTS"      ]] && TWP_VARS+=("TWP_ALLOWED_HOSTS=${TWP_ALLOWED_HOSTS}")
 [[ -n "$TWP_DISABLE_HOST_CHECK" ]] && TWP_VARS+=("TWP_DISABLE_HOST_CHECK=${TWP_DISABLE_HOST_CHECK}")
+[[ -n "$TWP_SECURE_COOKIES"     ]] && TWP_VARS+=("TWP_SECURE_COOKIES=${TWP_SECURE_COOKIES}")
 
 # Print which vars will be baked so the user can see what's happening.
 if [[ ${#TWP_VARS[@]} -gt 0 ]]; then

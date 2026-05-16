@@ -644,3 +644,49 @@ exit 0
 		}
 	}
 }
+
+func TestContexts_CreateContext_RejectsLongReadFilter(t *testing.T) {
+	installFakeTaskWith(t, fakeTaskOpts{})
+	c := newContexts()
+
+	form := url.Values{"name": {"work"}, "read_filter": {strings.Repeat("a", 1025)}, "write_filter": {""}}
+	req := httptest.NewRequest(http.MethodPost, "/contexts", strings.NewReader(form.Encode()))
+	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+	rr := httptest.NewRecorder()
+	c.CreateContext(rr, req)
+
+	if rr.Code != http.StatusBadRequest {
+		t.Errorf("oversized read filter: got %d want 400", rr.Code)
+	}
+}
+
+func TestContexts_CreateContext_RejectsLongWriteFilter(t *testing.T) {
+	installFakeTaskWith(t, fakeTaskOpts{})
+	c := newContexts()
+
+	form := url.Values{"name": {"work"}, "read_filter": {"+work"}, "write_filter": {strings.Repeat("b", 1025)}}
+	req := httptest.NewRequest(http.MethodPost, "/contexts", strings.NewReader(form.Encode()))
+	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+	rr := httptest.NewRecorder()
+	c.CreateContext(rr, req)
+
+	if rr.Code != http.StatusBadRequest {
+		t.Errorf("oversized write filter: got %d want 400", rr.Code)
+	}
+}
+
+func TestContexts_CreateContext_AcceptsMaxLengthFilter(t *testing.T) {
+	installFakeTaskWith(t, fakeTaskOpts{})
+	c := newContexts()
+
+	form := url.Values{"name": {"work"}, "read_filter": {strings.Repeat("a", 1024)}, "write_filter": {""}}
+	req := httptest.NewRequest(http.MethodPost, "/contexts", strings.NewReader(form.Encode()))
+	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+	rr := httptest.NewRecorder()
+	c.CreateContext(rr, req)
+
+	// 1024 chars is exactly at the limit — should not be rejected for length
+	if rr.Code == http.StatusBadRequest && strings.Contains(rr.Body.String(), "too long") {
+		t.Errorf("filter at exactly 1024 chars should not be rejected for length")
+	}
+}

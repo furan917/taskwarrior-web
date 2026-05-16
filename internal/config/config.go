@@ -29,10 +29,10 @@ const (
 // Container deployments set TWP_BIND_HOST=0.0.0.0; Unraid users control
 // the external port via Docker's port-mapping and TWP_BIND_PORT.
 func Addr() string {
-	return bindHost() + ":" + bindPort()
+	return BindHost() + ":" + bindPort()
 }
 
-func bindHost() string {
+func BindHost() string {
 	if v := os.Getenv("TWP_BIND_HOST"); v != "" {
 		return v
 	}
@@ -123,6 +123,19 @@ func AllowedOrigins() []string {
 // the external port or hostname is not known at startup.
 func DisableHostCheck() bool {
 	v := os.Getenv("TWP_DISABLE_HOST_CHECK")
+	if v == "" {
+		return false
+	}
+	b, _ := strconv.ParseBool(v)
+	return b
+}
+
+// SecureCookies reports whether TWP_SECURE_COOKIES is set to a truthy value.
+// When true, session cookies (CSRF token) are set with the Secure flag so they
+// are only sent over HTTPS. Enable this when the portal is behind a TLS-
+// terminating reverse proxy.
+func SecureCookies() bool {
+	v := os.Getenv("TWP_SECURE_COOKIES")
 	if v == "" {
 		return false
 	}

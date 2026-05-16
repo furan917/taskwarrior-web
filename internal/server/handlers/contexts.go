@@ -59,6 +59,7 @@ type Contexts struct {
 // subtitle all derive from the request-time active context, so a full reload
 // is the simplest way to keep them in sync.
 func (c *Contexts) Set(w http.ResponseWriter, r *http.Request) {
+	r.Body = http.MaxBytesReader(w, r.Body, 64<<10)
 	if err := r.ParseForm(); err != nil {
 		http.Error(w, "bad form", http.StatusBadRequest)
 		return
@@ -174,6 +175,7 @@ func (c *Contexts) DeleteContext(w http.ResponseWriter, r *http.Request) {
 }
 
 func parseContextForm(w http.ResponseWriter, r *http.Request) (name, readFilter, writeFilter string, ok bool) {
+	r.Body = http.MaxBytesReader(w, r.Body, 64<<10)
 	if err := r.ParseForm(); err != nil {
 		http.Error(w, "bad form", http.StatusBadRequest)
 		return "", "", "", false
@@ -181,6 +183,10 @@ func parseContextForm(w http.ResponseWriter, r *http.Request) (name, readFilter,
 	name = strings.TrimSpace(r.FormValue("name"))
 	readFilter = strings.TrimSpace(r.FormValue("read_filter"))
 	writeFilter = strings.TrimSpace(r.FormValue("write_filter"))
+	if len(readFilter) > 1024 || len(writeFilter) > 1024 {
+		http.Error(w, "filter expression too long (max 1024 characters)", http.StatusBadRequest)
+		return "", "", "", false
+	}
 	if !tw.ContextNamePattern.MatchString(name) {
 		http.Error(w, "invalid context name - letters, digits, dash and underscore only", http.StatusBadRequest)
 		return "", "", "", false

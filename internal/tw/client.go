@@ -1350,7 +1350,7 @@ func (c *Client) Undo(ctx context.Context) error {
 // Names failing ContextNamePattern are dropped silently as defence-in-depth.
 func (c *Client) ListContexts(ctx context.Context) ([]Context, error) {
 	args := c.argv("rc.defaultwidth:1000", "context", "list")
-	out, err := c.runRaw(ctx, args)
+	out, err := c.runRaw(ctx, args) // rc.defaultwidth is a trusted constant; runRaw bypass of guardArgs is intentional
 	if err != nil {
 		return nil, fmt.Errorf("list contexts: %w", err)
 	}
