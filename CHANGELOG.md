@@ -1,5 +1,12 @@
 # Changelog
 
+## [1.4.6](https://github.com/furan917/taskwarrior-web-portal/compare/v1.4.5...v1.4.6) (2026-05-20)
+
+
+### Bug Fixes
+
+* add basic kanban to portal ([509bfed](https://github.com/furan917/taskwarrior-web-portal/commit/509bfed972acd0f0a611c2c693c691ffa2b163c8))
+
 ## [1.4.5](https://github.com/furan917/taskwarrior-web-portal/compare/v1.4.4...v1.4.5) (2026-05-16)
 
 
