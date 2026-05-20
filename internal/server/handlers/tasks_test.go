@@ -1828,3 +1828,167 @@ func readImportedTaskAnns(t *testing.T, captured string) []tw.Annotation {
 	}
 	return imported[0].Annotations
 }
+
+// ── Move handler ──────────────────────────────────────────────────────────────
+
+const moveUUID = "aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee"
+
+// inactiveTaskJSON is a pending task with no Start (not active).
+const inactiveTaskJSON = `[{
+	"id": 42,
+	"uuid": "` + moveUUID + `",
+	"description": "test task",
+	"status": "pending",
+	"entry": "20260501T120000Z"
+}]`
+
+// activeTaskJSON is a pending task with Start set (IsActive() == true).
+const activeTaskJSON = `[{
+	"id": 42,
+	"uuid": "` + moveUUID + `",
+	"description": "test task",
+	"status": "pending",
+	"entry": "20260501T120000Z",
+	"start": "20260519T080000Z"
+}]`
+
+func newMoveRequest(id, column string) *http.Request {
+	r := formRequest(http.MethodPost, "/tasks/"+id+"/move", "column="+column)
+	r.SetPathValue("id", id)
+	return r
+}
+
+func TestTasks_Move_RejectsBadID(t *testing.T) {
+	tk := newTasks()
+	for _, bad := range []string{"../etc", "1;rm", ""} {
+		req := newMoveRequest(bad, "backlog")
+		rr := httptest.NewRecorder()
+		tk.Move(rr, req)
+		if rr.Code != http.StatusBadRequest {
+			t.Errorf("id %q: got %d want 400", bad, rr.Code)
+		}
+	}
+}
+
+func TestTasks_Move_RejectsInvalidColumn(t *testing.T) {
+	installFakeTask(t, inactiveTaskJSON)
+	tk := newTasks()
+	for _, bad := range []string{"", "archive", "DONE", "in_progress"} {
+		req := newMoveRequest("42", bad)
+		rr := httptest.NewRecorder()
+		tk.Move(rr, req)
+		if rr.Code != http.StatusBadRequest {
+			t.Errorf("column %q: got %d want 400", bad, rr.Code)
+		}
+	}
+}
+
+func TestTasks_Move_Done_Success(t *testing.T) {
+	logDir := installCascadeFake(t, inactiveTaskJSON)
+	tk := newTasks()
+	rr := httptest.NewRecorder()
+	tk.Move(rr, newMoveRequest("42", "done"))
+
+	if rr.Code != http.StatusNoContent {
+		t.Fatalf("got %d want 204", rr.Code)
+	}
+	if rr.Header().Get("HX-Trigger") != "refresh" {
+		t.Error("HX-Trigger missing")
+	}
+	// Should call `task 42 done` — no export needed for the done path.
+	all := readAllArgs(t, logDir)
+	last := all[len(all)-1]
+	if !contains(last, "done") {
+		t.Errorf("argv %v: expected 'done'", last)
+	}
+}
+
+func TestTasks_Move_ToBacklog_InactiveTask(t *testing.T) {
+	logDir := installCascadeFake(t, inactiveTaskJSON)
+	tk := newTasks()
+	rr := httptest.NewRecorder()
+	tk.Move(rr, newMoveRequest(moveUUID, "backlog"))
+
+	if rr.Code != http.StatusNoContent {
+		t.Fatalf("got %d want 204; body=%s", rr.Code, rr.Body.String())
+	}
+	all := readAllArgs(t, logDir)
+	// Should only be: export + modify (no stop because task is not active).
+	for _, argv := range all {
+		if contains(argv, "stop") {
+			t.Errorf("stop called on inactive task: %v", argv)
+		}
+	}
+	modifySeen := false
+	for _, argv := range all {
+		if contains(argv, "modify") {
+			modifySeen = true
+		}
+	}
+	if !modifySeen {
+		t.Error("modify not called")
+	}
+}
+
+func TestTasks_Move_ToBacklog_ActiveTask_StopsFirst(t *testing.T) {
+	logDir := installCascadeFake(t, activeTaskJSON)
+	tk := newTasks()
+	rr := httptest.NewRecorder()
+	tk.Move(rr, newMoveRequest(moveUUID, "backlog"))
+
+	if rr.Code != http.StatusNoContent {
+		t.Fatalf("got %d want 204; body=%s", rr.Code, rr.Body.String())
+	}
+	all := readAllArgs(t, logDir)
+	stopSeen, modifySeen := false, false
+	for _, argv := range all {
+		if contains(argv, "stop") {
+			stopSeen = true
+		}
+		if contains(argv, "modify") {
+			modifySeen = true
+		}
+	}
+	if !stopSeen {
+		t.Error("stop not called for active task moving to backlog")
+	}
+	if !modifySeen {
+		t.Error("modify not called")
+	}
+}
+
+func TestTasks_Move_ToInProgress_ActiveTask_DoesNotStop(t *testing.T) {
+	logDir := installCascadeFake(t, activeTaskJSON)
+	tk := newTasks()
+	rr := httptest.NewRecorder()
+	tk.Move(rr, newMoveRequest(moveUUID, "inprogress"))
+
+	if rr.Code != http.StatusNoContent {
+		t.Fatalf("got %d want 204; body=%s", rr.Code, rr.Body.String())
+	}
+	for _, argv := range readAllArgs(t, logDir) {
+		if contains(argv, "stop") {
+			t.Errorf("stop called when moving active task to inprogress: %v", argv)
+		}
+	}
+}
+
+func TestTasks_Move_404WhenTaskNotFound(t *testing.T) {
+	installFakeTask(t, "[]")
+	tk := newTasks()
+	rr := httptest.NewRecorder()
+	tk.Move(rr, newMoveRequest("99", "backlog"))
+	if rr.Code != http.StatusNotFound {
+		t.Errorf("got %d want 404", rr.Code)
+	}
+}
+
+// contains reports whether needle appears in haystack.
+func contains(haystack []string, needle string) bool {
+	for _, s := range haystack {
+		if s == needle {
+			return true
+		}
+	}
+	return false
+}

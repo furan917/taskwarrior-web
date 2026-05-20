@@ -1,0 +1,287 @@
+package views
+
+import (
+	"fmt"
+	"github.com/furan917/taskwarrior-web-portal/internal/tw"
+)
+
+// KanbanColCap is the maximum number of tasks shown per column.
+// Tasks are sorted by urgency before capping so the most actionable
+// ones are always visible; the overflow count appears in a footer.
+const KanbanColCap = 15
+
+// KanbanColumn holds the capped task slice and the pre-cap total.
+type KanbanColumn struct {
+	Tasks []tw.Task
+	Total int // count before cap
+}
+
+func (c KanbanColumn) More() int { return c.Total - len(c.Tasks) }
+
+// CapKanbanCol returns a KanbanColumn sliced to KanbanColCap.
+// The caller must sort tasks before calling so the cap keeps the right ones.
+func CapKanbanCol(tasks []tw.Task) KanbanColumn {
+	total := len(tasks)
+	if total > KanbanColCap {
+		return KanbanColumn{Tasks: tasks[:KanbanColCap], Total: total}
+	}
+	return KanbanColumn{Tasks: tasks, Total: total}
+}
+
+// KanbanData holds tasks pre-grouped into display columns.
+type KanbanData struct {
+	Inbox      KanbanColumn
+	Backlog    KanbanColumn
+	InProgress KanbanColumn
+	OnHold     KanbanColumn
+	Done       KanbanColumn // last 7 days, most recent first
+}
+
+// KanbanColumnFor assigns a pending task to its display column using a unified
+// model that covers both tag-based kanbanwarrior conventions
+// (keigezellig: +backlog/+inprogress/+onhold) and start-based ones
+// (CourrierGui: task start / ACTIVE virtual tag).
+func KanbanColumnFor(t tw.Task) string {
+	for _, tag := range t.Tags {
+		if tag == "onhold" {
+			return "onhold"
+		}
+	}
+	if t.IsActive() {
+		return "inprogress"
+	}
+	for _, tag := range t.Tags {
+		if tag == "inprogress" {
+			return "inprogress"
+		}
+	}
+	for _, tag := range t.Tags {
+		if tag == "inbox" {
+			return "inbox"
+		}
+	}
+	return "backlog"
+}
+
+templ KanbanPage(p Page, data KanbanData) {
+	@Layout(p) {
+		<h2 class="mb-4 text-lg font-medium">Kanban</h2>
+		@kanbanBoard(data)
+	}
+}
+
+templ kanbanBoard(data KanbanData) {
+	// Mobile tab strip — hidden on md+ where all columns show simultaneously.
+	// scrollbar-none suppresses the scrollbar on the pill row itself; the pills
+	// still scroll horizontally via touch/trackpad.
+	<div class="mb-3 flex gap-1 md:hidden" id="kanban-tabs" aria-label="Jump to column">
+		@kanbanTab("inbox", "Inbox", data.Inbox.Total, true)
+		@kanbanTab("backlog", "Backlog", data.Backlog.Total, false)
+		@kanbanTab("inprogress", "In Progress", data.InProgress.Total, false)
+		@kanbanTab("onhold", "On Hold", data.OnHold.Total, false)
+		@kanbanTab("done", "Done", data.Done.Total, false)
+	</div>
+	// On desktop (md+): board is a plain flex row; gap-2 gives breathing room
+	// between columns. No overflow wrapper — the flex children use flex-1
+	// min-w-0 so they share available width equally and never exceed it.
+	//
+	// On mobile (<md): board is a block; JS shows exactly one col-* div at a
+	// time by toggling between "hidden" and "block". No scroll container needed
+	// because the visible column is just normal block flow — the page itself
+	// scrolls vertically as usual.
+	//
+	// No-JS fallback: all columns have "block md:flex-1" so without JS they
+	// stack vertically on mobile (readable) and still fill width on desktop.
+	<div class="pb-6 md:flex md:items-start md:gap-2" id="kanban-board">
+		@kanbanCol("Inbox", "inbox", data.Inbox, true)
+		@kanbanCol("Backlog", "backlog", data.Backlog, false)
+		@kanbanCol("In Progress", "inprogress", data.InProgress, false)
+		@kanbanCol("On Hold", "onhold", data.OnHold, false)
+		@kanbanCol("Done", "done", data.Done, false)
+	</div>
+	// Tailwind JIT anchor: keeps tab-pill active-class variants in the
+	// compiled stylesheet even though they only appear in data-active-cls
+	// attributes at runtime. This comment is intentional — do not remove.
+	// bg-violet-600 dark:bg-violet-500 bg-blue-600 dark:bg-blue-500
+	// bg-amber-500 bg-green-600 dark:bg-green-600 bg-zinc-600 dark:bg-zinc-500
+}
+
+// kanbanTab renders one pill in the mobile tab strip.
+// active=true on the server-default column (inbox) so the first paint
+// matches without waiting for JS. The JS re-applies these classes on
+// click, so the class strings must appear in the template markup for
+// Tailwind JIT to include them in the compiled stylesheet.
+templ kanbanTab(id, label string, count int, active bool) {
+	if active {
+		<button
+			type="button"
+			data-col={ id }
+			data-active-cls={ kanbanTabActiveClass(id) }
+			class={ "shrink-0 rounded-full px-2.5 py-0.5 text-[11px] font-semibold " + kanbanTabActiveClass(id) }
+		>{ label }</button>
+	} else {
+		<button
+			type="button"
+			data-col={ id }
+			data-active-cls={ kanbanTabActiveClass(id) }
+			class="shrink-0 rounded-full border border-zinc-400 px-2.5 py-0.5 text-[11px] font-medium text-zinc-600 dark:border-zinc-600 dark:text-zinc-300"
+		>{ label }</button>
+	}
+}
+
+// kanbanCol renders one kanban column.
+//
+// Desktop (md+): the parent is a flex row; "md:flex-1 md:min-w-0" makes every
+// column take equal shares of the row width. md:min-w-0 is critical: without
+// it a flex child's minimum size defaults to its content width, so the flex
+// algorithm can't shrink the column below that, causing the 5-column overflow.
+// min-w-0 tells the browser the column may shrink to zero if needed, so
+// flex-1 distributes space evenly. md:min-w-40 then re-applies a 160px floor
+// (10rem) so cards don't become unreadable; if the container is too narrow for
+// five 160px columns the page natural overflow behaviour takes over (rare on
+// any reasonably sized desktop).
+//
+// Mobile (<md): server sets first column to "block", rest to "hidden". JS
+// toggles these on tab click. "flex" is only present on md+ via "md:flex" so
+// mobile columns are block-level and take full width naturally.
+//
+// data-col-id is the JS hook; id="col-*" is kept for any external deep-links.
+templ kanbanCol(label, id string, col KanbanColumn, initialVisible bool) {
+	<div
+		id={ "col-" + id }
+		data-col-id={ id }
+		class={ "flex-col rounded-lg border border-zinc-200 bg-zinc-50 mb-3 md:mb-0 md:flex md:flex-1 md:min-w-0 md:min-w-40 dark:border-zinc-700 dark:bg-zinc-900 " + kanbanColVisibilityClass(initialVisible) }
+	>
+		<div class={ "flex items-center justify-between rounded-t-lg px-3 py-2.5 " + kanbanColHeaderClass(id) }>
+			<span class="text-sm font-semibold">{ label }</span>
+			<span class="rounded-full px-2 py-0.5 text-xs font-semibold tabular-nums opacity-70">
+				{ fmt.Sprintf("%d", col.Total) }
+			</span>
+		</div>
+		<div class="flex flex-col gap-2 p-2">
+			for _, t := range col.Tasks {
+				@kanbanCard(t, id)
+			}
+			if col.Total == 0 {
+				<p class="py-6 text-center text-xs text-zinc-400 dark:text-zinc-600">Empty</p>
+			}
+			if col.More() > 0 {
+				<p class="py-2 text-center text-xs text-zinc-400 dark:text-zinc-500">
+					{ fmt.Sprintf("… and %d more", col.More()) }
+				</p>
+			}
+		</div>
+	</div>
+}
+
+templ kanbanCard(t tw.Task, currentCol string) {
+	<div class="group relative rounded-md border border-zinc-200 bg-white shadow-sm dark:border-zinc-600 dark:bg-zinc-800">
+		<div
+			class="cursor-pointer p-3 hover:border-blue-400 dark:hover:border-blue-500"
+			hx-get={ "/forms/edit/" + t.UUID }
+			hx-target="#modal"
+		>
+			<p class="pr-6 text-sm leading-snug text-zinc-800 dark:text-zinc-100">{ t.Description }</p>
+			if t.Project != "" || t.Due != "" {
+				<div class="mt-2 flex flex-wrap items-center gap-1.5">
+					if t.Project != "" {
+						<span class="rounded bg-zinc-100 px-1.5 py-0.5 text-[11px] text-zinc-600 dark:bg-zinc-700 dark:text-zinc-300">{ t.Project }</span>
+					}
+					if t.Due != "" {
+						@Due(t.Due)
+					}
+				</div>
+			}
+		</div>
+		<span class="absolute right-1.5 top-1.5 sm:opacity-0 sm:transition-opacity sm:group-hover:opacity-100" data-popover-wrap>
+			<button
+				type="button"
+				data-popover-trigger
+				class="flex h-6 w-6 items-center justify-center rounded text-zinc-400 hover:bg-zinc-100 hover:text-zinc-600 dark:hover:bg-zinc-700 dark:hover:text-zinc-300"
+				aria-label="Move to column"
+				title="Move to column"
+			>
+				<svg class="h-3.5 w-3.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+					<path d="M5 9l-3 3 3 3"></path>
+					<path d="M9 5l3-3 3 3"></path>
+					<path d="M15 19l3 3 3-3"></path>
+					<path d="M19 9l3 3-3 3"></path>
+					<line x1="2" y1="12" x2="22" y2="12"></line>
+					<line x1="12" y1="2" x2="12" y2="22"></line>
+				</svg>
+			</button>
+			<div
+				class="absolute right-0 top-full z-20 mt-1 hidden min-w-36 rounded border border-zinc-200 bg-white py-1 text-sm shadow-lg dark:border-zinc-700 dark:bg-zinc-900"
+				role="menu"
+				data-popover-menu
+			>
+				@kanbanMoveItem(t.UUID, "Inbox", "inbox", currentCol)
+				@kanbanMoveItem(t.UUID, "Backlog", "backlog", currentCol)
+				@kanbanMoveItem(t.UUID, "In Progress", "inprogress", currentCol)
+				@kanbanMoveItem(t.UUID, "On Hold", "onhold", currentCol)
+				<div class="my-1 border-t border-zinc-100 dark:border-zinc-800"></div>
+				@kanbanMoveItem(t.UUID, "Done", "done", currentCol)
+			</div>
+		</span>
+	</div>
+}
+
+templ kanbanMoveItem(uuid, label, col, currentCol string) {
+	if col == currentCol {
+		<span class="block cursor-default px-3 py-1.5 text-zinc-400 dark:text-zinc-600">{ label } ✓</span>
+	} else {
+		<button
+			type="button"
+			role="menuitem"
+			class="block w-full px-3 py-1.5 text-left text-zinc-700 hover:bg-zinc-100 dark:text-zinc-200 dark:hover:bg-zinc-800"
+			hx-post={ "/tasks/" + uuid + "/move" }
+			hx-vals={ `{"column":"` + col + `"}` }
+			hx-swap="none"
+			if col == "done" {
+				hx-confirm="Mark as done?"
+			}
+			data-popover-item
+		>{ label }</button>
+	}
+}
+
+// kanbanColVisibilityClass returns the mobile visibility class for a column.
+// On mobile, only the initially-visible column is "block"; others are "hidden".
+// On desktop (md+) the md:flex on the column element overrides both, so all
+// columns are visible regardless of this class.
+func kanbanColVisibilityClass(visible bool) string {
+	if visible {
+		return "block"
+	}
+	return "hidden"
+}
+
+func kanbanTabActiveClass(id string) string {
+	switch id {
+	case "inbox":
+		return "bg-violet-600 text-white dark:bg-violet-500 dark:text-white"
+	case "inprogress":
+		return "bg-blue-600 text-white dark:bg-blue-500 dark:text-white"
+	case "onhold":
+		return "bg-amber-500 text-white dark:bg-amber-500 dark:text-white"
+	case "done":
+		return "bg-green-600 text-white dark:bg-green-600 dark:text-white"
+	default: // backlog
+		return "bg-zinc-600 text-white dark:bg-zinc-500 dark:text-white"
+	}
+}
+
+func kanbanColHeaderClass(id string) string {
+	switch id {
+	case "inbox":
+		return "bg-violet-100 text-violet-900 dark:bg-violet-900/30 dark:text-violet-200"
+	case "inprogress":
+		return "bg-blue-100 text-blue-900 dark:bg-blue-950/40 dark:text-blue-200"
+	case "onhold":
+		return "bg-amber-100 text-amber-900 dark:bg-amber-900/30 dark:text-amber-200"
+	case "done":
+		return "bg-green-100 text-green-900 dark:bg-green-950/40 dark:text-green-200"
+	default: // backlog
+		return "bg-zinc-200 text-zinc-800 dark:bg-zinc-700 dark:text-zinc-200"
+	}
+}

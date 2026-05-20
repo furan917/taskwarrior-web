@@ -709,6 +709,67 @@ func splitCSV(s string) []string {
 	return out
 }
 
+// Move reassigns a task to a different kanban column. For "done" it calls
+// `task done`; for other columns it adjusts the three column tags (inbox,
+// inprogress, onhold) and stops the task if it was active and is leaving the
+// inprogress column.
+func (t *Tasks) Move(w http.ResponseWriter, r *http.Request) {
+	id := r.PathValue("id")
+	if !tw.IDPattern.MatchString(id) {
+		http.Error(w, "invalid id", http.StatusBadRequest)
+		return
+	}
+	if err := r.ParseForm(); err != nil {
+		http.Error(w, "bad form", http.StatusBadRequest)
+		return
+	}
+	col := r.FormValue("column")
+	valid := map[string]bool{"inbox": true, "backlog": true, "inprogress": true, "onhold": true, "done": true}
+	if !valid[col] {
+		http.Error(w, "invalid column", http.StatusBadRequest)
+		return
+	}
+	ctx := r.Context()
+
+	if col == "done" {
+		if err := t.TW.Run(ctx, id, "done"); err != nil && !tw.IsNoOpExit(err) {
+			t.Logger.Error("kanban move to done failed", "id", id, "err", err)
+			http.Error(w, "done failed", http.StatusInternalServerError)
+			return
+		}
+		writeRefresh(w)
+		return
+	}
+
+	tasks, err := t.TW.Export(ctx, "uuid:"+id)
+	if err != nil || len(tasks) == 0 {
+		http.Error(w, "task not found", http.StatusNotFound)
+		return
+	}
+	task := tasks[0]
+
+	if task.IsActive() && col != "inprogress" {
+		_ = t.TW.Stop(ctx, id)
+	}
+
+	// Column tags: inbox, inprogress, onhold. Backlog = none of these.
+	colTags := []string{"inbox", "inprogress", "onhold"}
+	args := []string{id, "modify"}
+	for _, tag := range colTags {
+		if tag == col {
+			args = append(args, "+"+tag)
+		} else {
+			args = append(args, "-"+tag)
+		}
+	}
+	if err := t.TW.Run(ctx, args...); err != nil && !tw.IsNoOpExit(err) {
+		t.Logger.Error("kanban move failed", "id", id, "col", col, "err", err)
+		http.Error(w, "move failed", http.StatusInternalServerError)
+		return
+	}
+	writeRefresh(w)
+}
+
 func writeRefresh(w http.ResponseWriter) {
 	w.Header().Set("HX-Trigger", "refresh")
 	w.WriteHeader(http.StatusNoContent)
